@@ -1,0 +1,66 @@
+{
+  "name": "default",
+  "width": 1200,
+  "height": 675,
+  "background_color": "#f7f2ea",
+  "layers": [
+    {
+      "id": "title",
+      "type": "text",
+      "field": "title",
+      "x": 120,
+      "y": 120,
+      "w": 960,
+      "h": 90,
+      "fontsize": 64,
+      "align": "center",
+      "valign": "middle",
+      "color": "#6f2438",
+      "required": false,
+      "default": "Invitation"
+    },
+    {
+      "id": "name",
+      "type": "text",
+      "field": "name",
+      "x": 150,
+      "y": 285,
+      "w": 900,
+      "h": 100,
+      "fontsize": 72,
+      "align": "center",
+      "valign": "middle",
+      "color": "#1f2933"
+    },
+    {
+      "id": "date",
+      "type": "text",
+      "field": "date",
+      "x": 150,
+      "y": 460,
+      "w": 900,
+      "h": 70,
+      "fontsize": 42,
+      "align": "center",
+      "valign": "middle",
+      "color": "#5a6270",
+      "required": false,
+      "default": ""
+    },
+    {
+      "id": "place",
+      "type": "text",
+      "field": "place",
+      "x": 150,
+      "y": 535,
+      "w": 900,
+      "h": 56,
+      "fontsize": 34,
+      "align": "center",
+      "valign": "middle",
+      "color": "#5a6270",
+      "required": false,
+      "default": ""
+    }
+  ]
+}

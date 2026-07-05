@@ -1,24 +1,68 @@
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
-from astrbot.api.star import Context, Star, register
-from astrbot.api import logger
+from pathlib import Path
+from uuid import uuid4
 
-@register("helloworld", "YourName", "一个简单的 Hello World 插件", "1.0.0")
-class MyPlugin(Star):
+from astrbot.api import logger
+from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.star import Context, Star, register
+
+from .manager import TemplateConfigError, TemplateManager
+from .renderer import RenderError, TemplateRenderer
+from .utils import parse_command_args
+
+
+@register(
+    "astrbot_plugin_customized_invitation",
+    "Meltyw4v3",
+    "Customized invitation image generator",
+    "1.0.0",
+)
+class CustomizedInvitationPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
+        self.plugin_dir = Path(__file__).resolve().parent
+        self.manager = TemplateManager(self.plugin_dir / "templates")
+        self.renderer = TemplateRenderer(self.plugin_dir / "fonts")
+        self.output_dir = self.plugin_dir / "outputs"
 
     async def initialize(self):
-        """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
+        """Initialize plugin directories.
 
-    # 注册指令的装饰器。指令名为 helloworld。注册成功后，发送 `/helloworld` 就会触发这个指令，并回复 `你好, {user_name}!`
-    @filter.command("helloworld")
-    async def helloworld(self, event: AstrMessageEvent):
-        """这是一个 hello world 指令""" # 这是 handler 的描述，将会被解析方便用户了解插件内容。建议填写。
-        user_name = event.get_sender_name()
-        message_str = event.message_str # 用户发的纯文本消息字符串
-        message_chain = event.get_messages() # 用户所发的消息的消息链 # from astrbot.api.message_components import *
-        logger.info(message_chain)
-        yield event.plain_result(f"Hello, {user_name}, 你发了 {message_str}!") # 发送一条纯文本消息
+        Returns:
+            None.
+        """
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    @filter.command("invitation", "邀请函")
+    async def invitation(self, event: AstrMessageEvent):
+        """Generate an invitation image from a template.
+
+        Args:
+            event: AstrBot message event.
+
+        Yields:
+            AstrBot message event result with a generated image or an error message.
+        """
+        try:
+            request = parse_command_args(
+                event.message_str, self.manager.list_templates()
+            )
+            template = self.manager.load(request.template_name)
+            image = self.renderer.render(template, request.fields)
+
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = self.output_dir / f"{template.name}_{uuid4().hex}.png"
+            image.save(output_path)
+            event.track_temporary_local_file(str(output_path))
+            yield event.image_result(str(output_path))
+        except (TemplateConfigError, RenderError, ValueError) as err:
+            yield event.plain_result(str(err))
+        except Exception as err:
+            logger.exception("Failed to generate invitation image: %s", err)
+            yield event.plain_result("生成邀请函失败，请联系管理员查看日志。")
 
     async def terminate(self):
-        """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
+        """Terminate plugin.
+
+        Returns:
+            None.
+        """
