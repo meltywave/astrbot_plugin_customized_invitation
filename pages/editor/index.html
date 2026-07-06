@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>邀请函模版编辑器</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4f6f8;
+        --panel: #ffffff;
+        --line: #d6dbe1;
+        --text: #20262d;
+        --muted: #68717d;
+        --accent: #176b87;
+        --danger: #a83232;
+        --ok: #1f7a4d;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+      }
+
+      .shell {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        min-height: 100vh;
+      }
+
+      .stage {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        min-width: 0;
+      }
+
+      .topbar,
+      .side {
+        background: var(--panel);
+        border-color: var(--line);
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        min-height: 64px;
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 650;
+        letter-spacing: 0;
+      }
+
+      .template-name {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .canvas-wrap {
+        display: grid;
+        place-items: center;
+        min-width: 0;
+        min-height: 0;
+        padding: 18px;
+      }
+
+      canvas {
+        max-width: 100%;
+        max-height: calc(100vh - 100px);
+        background: #ffffff;
+        border: 1px solid var(--line);
+      }
+
+      .side {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        padding: 18px;
+        border-left: 1px solid var(--line);
+        overflow: auto;
+      }
+
+      .group {
+        display: grid;
+        gap: 10px;
+      }
+
+      .group-title {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 650;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      input,
+      select,
+      button {
+        min-height: 36px;
+        border-radius: 6px;
+        font: inherit;
+      }
+
+      input,
+      select {
+        width: 100%;
+        border: 1px solid var(--line);
+        background: #ffffff;
+        color: var(--text);
+        padding: 6px 9px;
+      }
+
+      input[type="color"] {
+        padding: 2px;
+      }
+
+      .grid2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      button {
+        border: 0;
+        background: var(--accent);
+        color: #ffffff;
+        cursor: pointer;
+        font-weight: 650;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
+      .status {
+        min-height: 20px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .status.error {
+        color: var(--danger);
+      }
+
+      .status.ok {
+        color: var(--ok);
+      }
+
+      @media (max-width: 860px) {
+        .shell {
+          grid-template-columns: 1fr;
+        }
+
+        .side {
+          border-left: 0;
+          border-top: 1px solid var(--line);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="stage">
+        <header class="topbar">
+          <div>
+            <h1>邀请函模版编辑器</h1>
+            <div class="template-name" id="templateName"></div>
+          </div>
+          <button id="saveBtn" type="button" disabled>保存</button>
+        </header>
+        <div class="canvas-wrap">
+          <canvas id="canvas" width="960" height="540"></canvas>
+        </div>
+      </section>
+      <aside class="side">
+        <section class="group">
+          <p class="group-title">图片</p>
+          <label>
+            模版图片
+            <input id="imageInput" type="file" accept="image/*" />
+          </label>
+        </section>
+
+        <section class="group">
+          <p class="group-title">文字区域</p>
+          <div class="grid2">
+            <label>
+              X
+              <input id="xInput" type="number" min="0" step="1" />
+            </label>
+            <label>
+              Y
+              <input id="yInput" type="number" min="0" step="1" />
+            </label>
+            <label>
+              宽
+              <input id="wInput" type="number" min="1" step="1" />
+            </label>
+            <label>
+              高
+              <input id="hInput" type="number" min="1" step="1" />
+            </label>
+          </div>
+        </section>
+
+        <section class="group">
+          <p class="group-title">文字样式</p>
+          <div class="grid2">
+            <label>
+              字号
+              <input id="fontSizeInput" type="number" min="8" step="1" value="48" />
+            </label>
+            <label>
+              颜色
+              <input id="colorInput" type="color" value="#000000" />
+            </label>
+          </div>
+          <label>
+            字体文件名
+            <input id="fontInput" type="text" placeholder="msyh.ttc" />
+          </label>
+          <div class="grid2">
+            <label>
+              水平
+              <select id="alignInput">
+                <option value="left">left</option>
+                <option value="center" selected>center</option>
+                <option value="right">right</option>
+              </select>
+            </label>
+            <label>
+              垂直
+              <select id="valignInput">
+                <option value="top">top</option>
+                <option value="middle" selected>middle</option>
+                <option value="bottom">bottom</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <div id="status" class="status"></div>
+      </aside>
+    </main>
+
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const task = params.get("task") || "";
+      const templateName = params.get("name") || "";
+      document.getElementById("templateName").textContent = templateName;
+
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+      const imageInput = document.getElementById("imageInput");
+      const saveBtn = document.getElementById("saveBtn");
+      const statusEl = document.getElementById("status");
+
+      const inputs = {
+        x: document.getElementById("xInput"),
+        y: document.getElementById("yInput"),
+        w: document.getElementById("wInput"),
+        h: document.getElementById("hInput"),
+        fontsize: document.getElementById("fontSizeInput"),
+        color: document.getElementById("colorInput"),
+        font: document.getElementById("fontInput"),
+        align: document.getElementById("alignInput"),
+        valign: document.getElementById("valignInput"),
+      };
+
+      let imageFile = null;
+      let bitmap = null;
+      let scale = 1;
+      let rect = { x: 96, y: 220, w: 768, h: 96 };
+      let dragMode = "";
+      let dragStart = null;
+
+      function setStatus(text, kind) {
+        statusEl.textContent = text || "";
+        statusEl.className = `status ${kind || ""}`.trim();
+      }
+
+      function fitCanvas(width, height) {
+        const maxWidth = Math.max(320, window.innerWidth - (window.innerWidth > 860 ? 380 : 36));
+        const maxHeight = Math.max(260, window.innerHeight - 104);
+        scale = Math.min(maxWidth / width, maxHeight / height, 1);
+        canvas.width = Math.round(width * scale);
+        canvas.height = Math.round(height * scale);
+      }
+
+      function syncInputs() {
+        inputs.x.value = Math.round(rect.x);
+        inputs.y.value = Math.round(rect.y);
+        inputs.w.value = Math.round(rect.w);
+        inputs.h.value = Math.round(rect.h);
+      }
+
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (bitmap) {
+          ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        } else {
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        const x = rect.x * scale;
+        const y = rect.y * scale;
+        const w = rect.w * scale;
+        const h = rect.h * scale;
+        ctx.save();
+        ctx.strokeStyle = "#176b87";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([8, 5]);
+        ctx.strokeRect(x, y, w, h);
+        ctx.setLineDash([]);
+        ctx.fillStyle = "rgba(23, 107, 135, 0.12)";
+        ctx.fillRect(x, y, w, h);
+        ctx.fillStyle = "#176b87";
+        ctx.fillRect(x + w - 10, y + h - 10, 10, 10);
+        ctx.restore();
+      }
+
+      function applyInputRect() {
+        rect = {
+          x: Math.max(0, Number(inputs.x.value) || 0),
+          y: Math.max(0, Number(inputs.y.value) || 0),
+          w: Math.max(1, Number(inputs.w.value) || 1),
+          h: Math.max(1, Number(inputs.h.value) || 1),
+        };
+        draw();
+      }
+
+      function canvasPoint(event) {
+        const box = canvas.getBoundingClientRect();
+        return {
+          x: (event.clientX - box.left) / scale,
+          y: (event.clientY - box.top) / scale,
+        };
+      }
+
+      function inResizeHandle(point) {
+        return (
+          point.x >= rect.x + rect.w - 18 &&
+          point.x <= rect.x + rect.w + 6 &&
+          point.y >= rect.y + rect.h - 18 &&
+          point.y <= rect.y + rect.h + 6
+        );
+      }
+
+      function inRect(point) {
+        return (
+          point.x >= rect.x &&
+          point.x <= rect.x + rect.w &&
+          point.y >= rect.y &&
+          point.y <= rect.y + rect.h
+        );
+      }
+
+      imageInput.addEventListener("change", async () => {
+        imageFile = imageInput.files?.[0] || null;
+        if (!imageFile) {
+          saveBtn.disabled = true;
+          return;
+        }
+        bitmap = await createImageBitmap(imageFile);
+        fitCanvas(bitmap.width, bitmap.height);
+        rect = {
+          x: Math.round(bitmap.width * 0.1),
+          y: Math.round(bitmap.height * 0.45),
+          w: Math.round(bitmap.width * 0.8),
+          h: Math.max(80, Math.round(bitmap.height * 0.14)),
+        };
+        inputs.fontsize.value = Math.max(32, Math.round(bitmap.height / 12));
+        syncInputs();
+        draw();
+        saveBtn.disabled = false;
+        setStatus("");
+      });
+
+      ["x", "y", "w", "h"].forEach((key) => {
+        inputs[key].addEventListener("input", applyInputRect);
+      });
+
+      canvas.addEventListener("pointerdown", (event) => {
+        const point = canvasPoint(event);
+        if (inResizeHandle(point)) {
+          dragMode = "resize";
+        } else if (inRect(point)) {
+          dragMode = "move";
+        } else {
+          dragMode = "draw";
+          rect = { x: point.x, y: point.y, w: 1, h: 1 };
+        }
+        dragStart = { point, rect: { ...rect } };
+        canvas.setPointerCapture(event.pointerId);
+      });
+
+      canvas.addEventListener("pointermove", (event) => {
+        if (!dragMode || !dragStart) {
+          return;
+        }
+        const point = canvasPoint(event);
+        const dx = point.x - dragStart.point.x;
+        const dy = point.y - dragStart.point.y;
+        if (dragMode === "move") {
+          rect.x = Math.max(0, dragStart.rect.x + dx);
+          rect.y = Math.max(0, dragStart.rect.y + dy);
+        } else if (dragMode === "resize") {
+          rect.w = Math.max(1, dragStart.rect.w + dx);
+          rect.h = Math.max(1, dragStart.rect.h + dy);
+        } else {
+          rect.x = Math.min(dragStart.point.x, point.x);
+          rect.y = Math.min(dragStart.point.y, point.y);
+          rect.w = Math.max(1, Math.abs(dx));
+          rect.h = Math.max(1, Math.abs(dy));
+        }
+        syncInputs();
+        draw();
+      });
+
+      canvas.addEventListener("pointerup", (event) => {
+        dragMode = "";
+        dragStart = null;
+        canvas.releasePointerCapture(event.pointerId);
+      });
+
+      saveBtn.addEventListener("click", async () => {
+        if (!task) {
+          setStatus("缺少上传任务。", "error");
+          return;
+        }
+        if (!imageFile) {
+          setStatus("请选择模版图片。", "error");
+          return;
+        }
+        saveBtn.disabled = true;
+        setStatus("保存中...");
+        const payload = new FormData();
+        payload.set("task", task);
+        payload.set("image", imageFile);
+        payload.set("x", String(Math.round(rect.x)));
+        payload.set("y", String(Math.round(rect.y)));
+        payload.set("w", String(Math.round(rect.w)));
+        payload.set("h", String(Math.round(rect.h)));
+        payload.set("fontsize", inputs.fontsize.value || "48");
+        payload.set("color", inputs.color.value || "#000000");
+        payload.set("align", inputs.align.value || "center");
+        payload.set("valign", inputs.valign.value || "middle");
+        if (inputs.font.value.trim()) {
+          payload.set("font", inputs.font.value.trim());
+        }
+
+        try {
+          const response = await fetch(
+            "/api/plug/astrbot_plugin_customized_invitation/editor/save",
+            { method: "POST", body: payload },
+          );
+          const data = await response.json();
+          if (!response.ok || data.status === "error") {
+            throw new Error(data.message || "保存失败。");
+          }
+          setStatus("已保存。", "ok");
+        } catch (error) {
+          setStatus(error.message || "保存失败。", "error");
+        } finally {
+          saveBtn.disabled = false;
+        }
+      });
+
+      syncInputs();
+      draw();
+    </script>
+  </body>
+</html>

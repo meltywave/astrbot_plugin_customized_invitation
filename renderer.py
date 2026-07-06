@@ -33,7 +33,7 @@ class TemplateRenderer:
             if layer.type == "text":
                 self._render_text_layer(draw, layer, data)
                 continue
-            raise RenderError(f"暂不支持的图层类型：{layer.type}")
+            raise RenderError(f"Unsupported layer type: {layer.type}")
         return image
 
     def _create_base_image(self, template: TemplateConfig) -> Image.Image:
@@ -53,10 +53,12 @@ class TemplateRenderer:
             try:
                 image = Image.open(background_path).convert("RGBA")
             except FileNotFoundError as err:
-                raise RenderError(f"模板背景图片不存在：{template.background}") from err
+                raise RenderError(
+                    f"Template background image does not exist: {template.background}"
+                ) from err
             except (OSError, UnidentifiedImageError) as err:
                 raise RenderError(
-                    f"模板背景图片无法读取：{template.background}"
+                    f"Template background image cannot be read: {template.background}"
                 ) from err
             if image.size != (template.width, template.height):
                 return image.resize((template.width, template.height))
@@ -65,7 +67,7 @@ class TemplateRenderer:
         try:
             color = ImageColor.getrgb(template.background_color)
         except ValueError as err:
-            raise RenderError("模板背景颜色无效。") from err
+            raise RenderError("Template background color is invalid.") from err
         return Image.new("RGBA", (template.width, template.height), color)
 
     def _render_text_layer(
@@ -87,7 +89,7 @@ class TemplateRenderer:
         """
         text = data.get(layer.field, layer.default).strip()
         if not text and layer.required:
-            raise ValueError(f"缺少必填字段：{layer.field}")
+            raise ValueError(f"Missing required field: {layer.field}")
 
         font = self._load_font(layer)
         bbox = draw.textbbox((0, 0), text, font=font)
@@ -111,7 +113,7 @@ class TemplateRenderer:
         try:
             fill = ImageColor.getrgb(layer.color)
         except ValueError as err:
-            raise RenderError(f"图层 {layer.id} 的颜色无效。") from err
+            raise RenderError(f"Layer {layer.id} color is invalid.") from err
         draw.text((x, y), text, font=font, fill=fill)
 
     def _load_font(
