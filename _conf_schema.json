@@ -1,0 +1,8 @@
+{
+  "public_base_url": {
+    "description": "公开访问地址",
+    "type": "string",
+    "default": "",
+    "hint": "用于生成模版编辑器链接。云服务器或 Docker 部署时请填写电脑浏览器可访问的 AstrBot 地址，例如 http://1.2.3.4:6185 或 https://bot.example.com。留空时会使用 AstrBot 全局 callback_api_base，仍为空则自动推断。"
+  }
+}

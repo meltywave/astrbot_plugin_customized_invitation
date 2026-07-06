@@ -1,9 +1,10 @@
 import hashlib
+import socket
 from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
 
-from astrbot.api import logger
+from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 from astrbot.api.web import error_response, json_response, request
@@ -32,8 +33,9 @@ SET_COMMANDS = {"set_template", SET_ALIAS}
     "1.0.0",
 )
 class CustomizedInvitationPlugin(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
+        self.config = config or {}
         self.plugin_dir = Path(__file__).resolve().parent
         self.manager = TemplateManager(self.plugin_dir / "templates")
         self.renderer = TemplateRenderer(self.plugin_dir / "fonts")
@@ -56,7 +58,7 @@ class CustomizedInvitationPlugin(Star):
             "Save customized invitation template from the editor page.",
         )
 
-    @filter.command("upload_template", UPLOAD_ALIAS)
+    @filter.command("upload_template", alias={UPLOAD_ALIAS})
     async def upload_template(self, event: AstrMessageEvent):
         """Create a user template upload task.
 
@@ -83,7 +85,7 @@ class CustomizedInvitationPlugin(Star):
                 "\u521b\u5efa\u6a21\u7248\u4e0a\u4f20\u4efb\u52a1\u5931\u8d25\uff0c\u8bf7\u67e5\u770b\u65e5\u5fd7\u3002"
             )
 
-    @filter.command("set_template", SET_ALIAS)
+    @filter.command("set_template", alias={SET_ALIAS})
     async def set_template(self, event: AstrMessageEvent):
         """Set the active template for the current user.
 
@@ -109,7 +111,7 @@ class CustomizedInvitationPlugin(Star):
                 "\u8bbe\u7f6e\u6a21\u7248\u5931\u8d25\uff0c\u8bf7\u67e5\u770b\u65e5\u5fd7\u3002"
             )
 
-    @filter.command("invitation", INVITATION_ALIAS)
+    @filter.command("invitation", alias={INVITATION_ALIAS})
     async def invitation(self, event: AstrMessageEvent):
         """Generate an invitation image from the active user template.
 
@@ -149,7 +151,7 @@ class CustomizedInvitationPlugin(Star):
                 "\u751f\u6210\u9080\u8bf7\u51fd\u5931\u8d25\uff0c\u8bf7\u67e5\u770b\u65e5\u5fd7\u3002"
             )
 
-    @filter.command("templates_list", LIST_ALIAS)
+    @filter.command("templates_list", alias={LIST_ALIAS})
     async def templates_list(self, event: AstrMessageEvent):
         """List templates available to the current user.
 
@@ -269,10 +271,14 @@ class CustomizedInvitationPlugin(Star):
         Returns:
             Editor URL.
         """
-        config = self.context.get_config()
-        base_url = str(config.get("callback_api_base") or "").rstrip("/")
+        core_config = self.context.get_config()
+        base_url = str(
+            self.config.get("public_base_url")
+            or core_config.get("callback_api_base")
+            or ""
+        ).rstrip("/")
         if not base_url:
-            dashboard = config.get("dashboard", {})
+            dashboard = core_config.get("dashboard", {})
             ssl_config = dashboard.get("ssl", {}) if isinstance(dashboard, dict) else {}
             scheme = (
                 "https"
@@ -280,10 +286,30 @@ class CustomizedInvitationPlugin(Star):
                 else "http"
             )
             port = dashboard.get("port", 6185) if isinstance(dashboard, dict) else 6185
-            base_url = f"{scheme}://localhost:{port}"
+            host = (
+                str(dashboard.get("host") or "").strip()
+                if isinstance(dashboard, dict)
+                else ""
+            )
+            if host in {"", "0.0.0.0", "::", "[::]"}:
+                host = "127.0.0.1"
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                        sock.connect(("8.8.8.8", 80))
+                        host = sock.getsockname()[0]
+                except OSError:
+                    try:
+                        detected_host = socket.gethostbyname(socket.gethostname())
+                        if not detected_host.startswith("127."):
+                            host = detected_host
+                    except OSError:
+                        pass
+            if ":" in host and not host.startswith("["):
+                host = f"[{host}]"
+            base_url = f"{scheme}://{host}:{port}"
         return (
             f"{base_url}/api/plugin/page/content/{PLUGIN_NAME}/editor/"
-            f"?task={quote(task_token)}&name={quote(template_name)}"
+            f"?task={quote(task_token, safe='')}&name={quote(template_name, safe='')}"
         )
 
     async def terminate(self):
