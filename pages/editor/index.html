@@ -515,10 +515,10 @@
       }
 
       function updateTemplateTitle() {
-        const modeText = task ? "当前模版" : "全局模版";
+        const modeText = task ? "Current template" : "Global template";
         templateNameEl.textContent = currentTemplateName()
-          ? `${modeText}：${currentTemplateName()}`
-          : "未命名模版";
+          ? `${modeText}: ${currentTemplateName()}`
+          : "Unnamed template";
       }
 
       function currentFontOption() {
@@ -555,7 +555,7 @@
       }
 
       function drawTextPreview() {
-        const text = "姓名示例";
+        const text = "Name preview";
         const fontSize = Math.max(8, Number(inputs.fontsize.value) || 48) * scale;
         const x = rect.x * scale;
         const y = rect.y * scale;
@@ -711,24 +711,89 @@
         setIconControlValue(valignControl, textValign);
       }
 
+      async function getPluginBridge() {
+        if (window.AstrBotPluginPage) {
+          await window.AstrBotPluginPage.ready();
+          return window.AstrBotPluginPage;
+        }
+        if (window.parent === window) {
+          return null;
+        }
+        for (let index = 0; index < 20; index += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          if (window.AstrBotPluginPage) {
+            await window.AstrBotPluginPage.ready();
+            return window.AstrBotPluginPage;
+          }
+        }
+        return null;
+      }
+
+      async function pluginApiGet(endpoint, params) {
+        const bridge = await getPluginBridge();
+        if (bridge) {
+          return bridge.apiGet(endpoint, params);
+        }
+        const query = new URLSearchParams();
+        Object.entries(params || {}).forEach(([key, value]) => {
+          if (value !== null && value !== undefined && value !== "") {
+            query.set(key, String(value));
+          }
+        });
+        const suffix = query.toString() ? `?${query.toString()}` : "";
+        const response = await fetch(
+          `/api/plug/astrbot_plugin_customized_invitation/${endpoint}${suffix}`,
+        );
+        const data = await response.json();
+        if (!response.ok || data.status === "error") {
+          throw new Error(data.message || "Request failed.");
+        }
+        return data;
+      }
+
+      async function pluginApiPost(endpoint, body) {
+        const bridge = await getPluginBridge();
+        if (bridge) {
+          return bridge.apiPost(endpoint, body);
+        }
+        const response = await fetch(
+          `/api/plug/astrbot_plugin_customized_invitation/${endpoint}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          },
+        );
+        const data = await response.json();
+        if (!response.ok || data.status === "error") {
+          throw new Error(data.message || "Request failed.");
+        }
+        return data;
+      }
+
+      function readFileAsDataUrl(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ""));
+          reader.onerror = () => reject(new Error("Failed to read image."));
+          reader.readAsDataURL(file);
+        });
+      }
+
       async function loadTemplates() {
         templateNameInput.value = initialTemplateName;
         updateTemplateTitle();
         updateSaveState();
 
         try {
-          const templatesUrl = task
-            ? `/api/plug/astrbot_plugin_customized_invitation/editor/templates?task=${encodeURIComponent(task)}`
-            : "/api/plug/astrbot_plugin_customized_invitation/editor/templates";
-          const response = await fetch(templatesUrl);
-          const data = await response.json();
-          if (!response.ok || data.status === "error") {
-            throw new Error(data.message || "读取模版列表失败。");
+          const data = await pluginApiGet("editor/templates", { task });
+          if (data.status === "error") {
+            throw new Error(data.message || "Failed to load templates.");
           }
 
           const groups = [
-            ["我的模版", data.user_templates || []],
-            ["全局模版", data.global_templates || []],
+            ["My templates", data.user_templates || []],
+            ["Global templates", data.global_templates || []],
           ];
           groups.forEach(([label, names]) => {
             if (!names.length) {
@@ -756,7 +821,7 @@
           updateTemplateTitle();
           updateSaveState();
         } catch (error) {
-          setStatus(error.message || "读取模版列表失败。", "error");
+          setStatus(error.message || "Failed to load templates.", "error");
         }
       }
 
@@ -855,45 +920,41 @@
 
       saveBtn.addEventListener("click", async () => {
         if (!currentTemplateName()) {
-          setStatus("请填写模版名称。", "error");
+          setStatus("Please enter a template name.", "error");
           return;
         }
         if (!imageFile) {
-          setStatus("请选择模版图片。", "error");
+          setStatus("Please choose a template image.", "error");
           return;
         }
         saveBtn.disabled = true;
         setStatus("保存中...");
-        const payload = new FormData();
+        const payload = {};
         if (task) {
-          payload.set("task", task);
+          payload.task = task;
         }
-        payload.set("template_name", currentTemplateName());
-        payload.set("image", imageFile);
-        payload.set("x", String(Math.round(rect.x)));
-        payload.set("y", String(Math.round(rect.y)));
-        payload.set("w", String(Math.round(rect.w)));
-        payload.set("h", String(Math.round(rect.h)));
-        payload.set("fontsize", inputs.fontsize.value || "48");
-        payload.set("color", inputs.color.value || "#000000");
-        payload.set("align", textAlign);
-        payload.set("valign", textValign);
+        payload.template_name = currentTemplateName();
+        payload.image = await readFileAsDataUrl(imageFile);
+        payload.x = String(Math.round(rect.x));
+        payload.y = String(Math.round(rect.y));
+        payload.w = String(Math.round(rect.w));
+        payload.h = String(Math.round(rect.h));
+        payload.fontsize = inputs.fontsize.value || "48";
+        payload.color = inputs.color.value || "#000000";
+        payload.align = textAlign;
+        payload.valign = textValign;
         if (currentFontValue()) {
-          payload.set("font", currentFontValue());
+          payload.font = currentFontValue();
         }
 
         try {
-          const response = await fetch(
-            "/api/plug/astrbot_plugin_customized_invitation/editor/save",
-            { method: "POST", body: payload },
-          );
-          const data = await response.json();
-          if (!response.ok || data.status === "error") {
-            throw new Error(data.message || "保存失败。");
+          const data = await pluginApiPost("editor/save", payload);
+          if (data.status === "error") {
+            throw new Error(data.message || "Failed to save template.");
           }
-          setStatus(`已保存模版：${data.template}`, "ok");
+          setStatus(`Saved template: ${data.template}`, "ok");
         } catch (error) {
-          setStatus(error.message || "保存失败。", "error");
+          setStatus(error.message || "Failed to save template.", "error");
         } finally {
           updateSaveState();
         }

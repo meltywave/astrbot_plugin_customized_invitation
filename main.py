@@ -1,3 +1,5 @@
+import base64
+import binascii
 import hashlib
 from pathlib import Path
 from urllib.parse import quote, urlencode
@@ -199,19 +201,44 @@ class CustomizedInvitationPlugin(Star):
         Returns:
             JSON response with created template metadata.
         """
-        form = await request.form()
-        files = await request.files()
-        task_token = str(form.get("task") or request.query.get("task") or "").strip()
+        content_type = str(request.content_type or "").lower()
+        body = await request.json({}) if "application/json" in content_type else {}
+        if body and not isinstance(body, dict):
+            return error_response("Invalid request payload.", status_code=400)
+
+        form = {}
+        files = {}
+        if not body:
+            form = await request.form()
+            files = await request.files()
+
+        task_token = str(
+            (body.get("task") if body else form.get("task"))
+            or request.query.get("task")
+            or ""
+        ).strip()
         task = self.state.get_upload_task(task_token) if task_token else None
         if task_token and not task:
             return error_response("Upload task is invalid or expired.", status_code=404)
 
-        image_file = files.get("image")
-        if image_file is None:
-            return error_response("Please upload one template image.")
-
         upload_path = self.upload_dir / f"{task_token or uuid4().hex}.upload"
-        await image_file.save(upload_path)
+        self.upload_dir.mkdir(parents=True, exist_ok=True)
+        if body:
+            image_data = str(body.get("image") or "")
+            if image_data.startswith("data:"):
+                image_data = image_data.split(",", 1)[1] if "," in image_data else ""
+            if not image_data:
+                return error_response("Please upload one template image.")
+            try:
+                upload_path.write_bytes(base64.b64decode(image_data, validate=True))
+            except (binascii.Error, OSError) as err:
+                logger.warning("Failed to decode uploaded template image: %s", err)
+                return error_response("Uploaded image data is invalid.")
+        else:
+            image_file = files.get("image")
+            if image_file is None:
+                return error_response("Please upload one template image.")
+            await image_file.save(upload_path)
 
         options: dict[str, str] = {}
         for key in (
@@ -226,13 +253,14 @@ class CustomizedInvitationPlugin(Star):
             "font",
             "default",
         ):
-            value = form.get(key)
+            value = body.get(key) if body else form.get(key)
             if value is not None:
                 options[key] = str(value)
 
         try:
             template_name = str(
-                form.get("template_name") or (task["template_name"] if task else "")
+                (body.get("template_name") if body else form.get("template_name"))
+                or (task["template_name"] if task else "")
             ).strip()
             if task:
                 template = self.manager.create_for_user_from_image(
