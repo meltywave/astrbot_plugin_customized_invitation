@@ -129,10 +129,24 @@ class TemplateRenderer:
         """
         candidates: list[Path | str] = []
         if layer.font:
-            font_path = Path(layer.font)
-            candidates.append(
-                font_path if font_path.is_absolute() else self.fonts_dir / font_path
-            )
+            preset_fonts: dict[str, list[Path | str]] = {
+                "microsoft_yahei": [Path("C:/Windows/Fonts/msyh.ttc")],
+                "simhei": [Path("C:/Windows/Fonts/simhei.ttf")],
+                "simsun": [Path("C:/Windows/Fonts/simsun.ttc")],
+                "pingfang": ["/System/Library/Fonts/PingFang.ttc"],
+                "noto_sans_cjk": [
+                    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+                ],
+                "dejavu_sans": ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"],
+            }
+            if layer.font in preset_fonts:
+                candidates.extend(preset_fonts[layer.font])
+            else:
+                font_path = Path(layer.font)
+                candidates.append(
+                    font_path if font_path.is_absolute() else self.fonts_dir / font_path
+                )
         candidates.extend(
             [
                 Path("C:/Windows/Fonts/msyh.ttc"),

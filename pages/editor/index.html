@@ -13,6 +13,7 @@
         --text: #20262d;
         --muted: #68717d;
         --accent: #176b87;
+        --soft: #e9f3f6;
         --danger: #a83232;
         --ok: #1f7a4d;
       }
@@ -36,7 +37,7 @@
 
       .shell {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 320px;
+        grid-template-columns: minmax(0, 1fr) 360px;
         min-height: 100vh;
       }
 
@@ -143,6 +144,101 @@
         gap: 10px;
       }
 
+      .font-presets {
+        display: grid;
+        gap: 8px;
+      }
+
+      .font-preset {
+        display: grid;
+        grid-template-columns: 92px minmax(0, 1fr);
+        align-items: center;
+        gap: 10px;
+        min-height: 46px;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #ffffff;
+        color: var(--text);
+        text-align: left;
+      }
+
+      .font-preset.active {
+        border-color: var(--accent);
+        background: var(--soft);
+      }
+
+      .font-label {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .font-sample {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 18px;
+      }
+
+      .icon-control-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .icon-control {
+        display: grid;
+        gap: 6px;
+      }
+
+      .icon-control-title {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .icon-segment {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0;
+        min-height: 36px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #ffffff;
+      }
+
+      .icon-option {
+        display: grid;
+        place-items: center;
+        min-width: 0;
+        min-height: 34px;
+        border: 0;
+        border-right: 1px solid var(--line);
+        border-radius: 0;
+        background: transparent;
+        color: var(--muted);
+        padding: 0;
+      }
+
+      .icon-option:last-child {
+        border-right: 0;
+      }
+
+      .icon-option.active {
+        background: var(--soft);
+        color: var(--accent);
+      }
+
+      .icon-option svg {
+        width: 20px;
+        height: 20px;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        fill: none;
+      }
+
       button {
         border: 0;
         background: var(--accent);
@@ -171,7 +267,7 @@
         color: var(--ok);
       }
 
-      @media (max-width: 860px) {
+      @media (max-width: 900px) {
         .shell {
           grid-template-columns: 1fr;
         }
@@ -197,7 +293,22 @@
           <canvas id="canvas" width="960" height="540"></canvas>
         </div>
       </section>
+
       <aside class="side">
+        <section class="group">
+          <p class="group-title">模版</p>
+          <label>
+            已上传模版
+            <select id="templateSelect">
+              <option value="">新增模版</option>
+            </select>
+          </label>
+          <label>
+            模版名称
+            <input id="templateNameInput" type="text" maxlength="64" />
+          </label>
+        </section>
+
         <section class="group">
           <p class="group-title">图片</p>
           <label>
@@ -241,26 +352,74 @@
             </label>
           </div>
           <label>
-            字体文件名
-            <input id="fontInput" type="text" placeholder="msyh.ttc" />
+            字体
+            <select id="fontInput"></select>
           </label>
-          <div class="grid2">
-            <label>
-              水平
-              <select id="alignInput">
-                <option value="left">left</option>
-                <option value="center" selected>center</option>
-                <option value="right">right</option>
-              </select>
-            </label>
-            <label>
-              垂直
-              <select id="valignInput">
-                <option value="top">top</option>
-                <option value="middle" selected>middle</option>
-                <option value="bottom">bottom</option>
-              </select>
-            </label>
+          <label id="customFontLabel" hidden>
+            自定义字体文件名
+            <input id="customFontInput" type="text" placeholder="my-font.ttf" />
+          </label>
+          <div class="font-presets" id="fontPresets"></div>
+          <div class="icon-control-grid">
+            <div class="icon-control">
+              <span class="icon-control-title">水平</span>
+              <div class="icon-segment" id="alignControl">
+                <button class="icon-option" type="button" data-value="left" title="左对齐" aria-label="左对齐">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 6h16" />
+                    <path d="M4 10h10" />
+                    <path d="M4 14h16" />
+                    <path d="M4 18h10" />
+                  </svg>
+                </button>
+                <button class="icon-option active" type="button" data-value="center" title="居中对齐" aria-label="居中对齐">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 6h16" />
+                    <path d="M7 10h10" />
+                    <path d="M4 14h16" />
+                    <path d="M7 18h10" />
+                  </svg>
+                </button>
+                <button class="icon-option" type="button" data-value="right" title="右对齐" aria-label="右对齐">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 6h16" />
+                    <path d="M10 10h10" />
+                    <path d="M4 14h16" />
+                    <path d="M10 18h10" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div class="icon-control">
+              <span class="icon-control-title">垂直</span>
+              <div class="icon-segment" id="valignControl">
+                <button class="icon-option" type="button" data-value="top" title="顶部对齐" aria-label="顶部对齐">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M5 5h14" />
+                    <path d="M8 9h8" />
+                    <path d="M7 13h10" />
+                    <path d="M9 17h6" />
+                  </svg>
+                </button>
+                <button class="icon-option active" type="button" data-value="middle" title="垂直居中" aria-label="垂直居中">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M5 5h14" />
+                    <path d="M8 9h8" />
+                    <path d="M7 12h10" />
+                    <path d="M8 15h8" />
+                    <path d="M5 19h14" />
+                  </svg>
+                </button>
+                <button class="icon-option" type="button" data-value="bottom" title="底部对齐" aria-label="底部对齐">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M9 7h6" />
+                    <path d="M7 11h10" />
+                    <path d="M8 15h8" />
+                    <path d="M5 19h14" />
+                  </svg>
+                </button>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -269,16 +428,85 @@
     </main>
 
     <script>
-      const params = new URLSearchParams(window.location.search);
-      const task = params.get("task") || "";
-      const templateName = params.get("name") || "";
-      document.getElementById("templateName").textContent = templateName;
+      const urlParams = new URLSearchParams(window.location.search);
+      const parentHash = (() => {
+        try {
+          return window.parent?.location?.hash || "";
+        } catch {
+          return "";
+        }
+      })();
+      const parentHashQuery = parentHash.includes("?")
+        ? parentHash.slice(parentHash.indexOf("?") + 1)
+        : "";
+      const routeParams = new URLSearchParams(parentHashQuery);
+      const task = urlParams.get("task") || routeParams.get("task") || "";
+      const initialTemplateName =
+        urlParams.get("name") || routeParams.get("name") || "";
 
       const canvas = document.getElementById("canvas");
       const ctx = canvas.getContext("2d");
       const imageInput = document.getElementById("imageInput");
       const saveBtn = document.getElementById("saveBtn");
       const statusEl = document.getElementById("status");
+      const templateSelect = document.getElementById("templateSelect");
+      const templateNameEl = document.getElementById("templateName");
+      const templateNameInput = document.getElementById("templateNameInput");
+      const fontPresetsEl = document.getElementById("fontPresets");
+      const customFontLabel = document.getElementById("customFontLabel");
+      const alignControl = document.getElementById("alignControl");
+      const valignControl = document.getElementById("valignControl");
+
+      const fontOptions = [
+        {
+          value: "",
+          label: "默认字体",
+          css: "system-ui, sans-serif",
+          sample: "默认字体预览",
+        },
+        {
+          value: "microsoft_yahei",
+          label: "微软雅黑",
+          css: '"Microsoft YaHei", "微软雅黑", sans-serif',
+          sample: "微软雅黑预览",
+        },
+        {
+          value: "simhei",
+          label: "黑体",
+          css: "SimHei, 黑体, sans-serif",
+          sample: "黑体预览",
+        },
+        {
+          value: "simsun",
+          label: "宋体",
+          css: "SimSun, 宋体, serif",
+          sample: "宋体预览",
+        },
+        {
+          value: "pingfang",
+          label: "苹方",
+          css: '"PingFang SC", "Hiragino Sans GB", sans-serif',
+          sample: "苹方预览",
+        },
+        {
+          value: "noto_sans_cjk",
+          label: "思源黑体",
+          css: '"Noto Sans CJK SC", "Source Han Sans SC", sans-serif',
+          sample: "思源黑体预览",
+        },
+        {
+          value: "dejavu_sans",
+          label: "DejaVu Sans",
+          css: '"DejaVu Sans", sans-serif',
+          sample: "DejaVu Sans",
+        },
+        {
+          value: "__custom__",
+          label: "自定义字体",
+          css: "system-ui, sans-serif",
+          sample: "输入字体文件名",
+        },
+      ];
 
       const inputs = {
         x: document.getElementById("xInput"),
@@ -288,8 +516,7 @@
         fontsize: document.getElementById("fontSizeInput"),
         color: document.getElementById("colorInput"),
         font: document.getElementById("fontInput"),
-        align: document.getElementById("alignInput"),
-        valign: document.getElementById("valignInput"),
+        customFont: document.getElementById("customFontInput"),
       };
 
       let imageFile = null;
@@ -298,14 +525,47 @@
       let rect = { x: 96, y: 220, w: 768, h: 96 };
       let dragMode = "";
       let dragStart = null;
+      let textAlign = "center";
+      let textValign = "middle";
 
       function setStatus(text, kind) {
         statusEl.textContent = text || "";
         statusEl.className = `status ${kind || ""}`.trim();
       }
 
+      function currentTemplateName() {
+        return templateNameInput.value.trim();
+      }
+
+      function updateTemplateTitle() {
+        templateNameEl.textContent = currentTemplateName()
+          ? `当前模版：${currentTemplateName()}`
+          : "未命名模版";
+      }
+
+      function currentFontOption() {
+        return (
+          fontOptions.find((option) => option.value === inputs.font.value) ||
+          fontOptions[0]
+        );
+      }
+
+      function currentFontValue() {
+        if (inputs.font.value === "__custom__") {
+          return inputs.customFont.value.trim();
+        }
+        return inputs.font.value;
+      }
+
+      function updateSaveState() {
+        saveBtn.disabled = !task || !imageFile || !currentTemplateName();
+      }
+
       function fitCanvas(width, height) {
-        const maxWidth = Math.max(320, window.innerWidth - (window.innerWidth > 860 ? 380 : 36));
+        const maxWidth = Math.max(
+          320,
+          window.innerWidth - (window.innerWidth > 900 ? 420 : 36),
+        );
         const maxHeight = Math.max(260, window.innerHeight - 104);
         scale = Math.min(maxWidth / width, maxHeight / height, 1);
         canvas.width = Math.round(width * scale);
@@ -317,6 +577,35 @@
         inputs.y.value = Math.round(rect.y);
         inputs.w.value = Math.round(rect.w);
         inputs.h.value = Math.round(rect.h);
+      }
+
+      function drawTextPreview() {
+        const text = "姓名示例";
+        const fontSize = Math.max(8, Number(inputs.fontsize.value) || 48) * scale;
+        const x = rect.x * scale;
+        const y = rect.y * scale;
+        const w = rect.w * scale;
+        const h = rect.h * scale;
+        const fontOption = currentFontOption();
+        ctx.save();
+        ctx.font = `${fontSize}px ${fontOption.css}`;
+        ctx.fillStyle = inputs.color.value || "#000000";
+        ctx.textBaseline = "middle";
+        ctx.textAlign = textAlign;
+        const textX =
+          textAlign === "center"
+            ? x + w / 2
+            : textAlign === "right"
+              ? x + w
+              : x;
+        const textY =
+          textValign === "top"
+            ? y + fontSize / 2
+            : textValign === "bottom"
+              ? y + h - fontSize / 2
+              : y + h / 2;
+        ctx.fillText(text, textX, textY, Math.max(1, w));
+        ctx.restore();
       }
 
       function draw() {
@@ -343,6 +632,7 @@
         ctx.fillStyle = "#176b87";
         ctx.fillRect(x + w - 10, y + h - 10, 10, 10);
         ctx.restore();
+        drawTextPreview();
       }
 
       function applyInputRect() {
@@ -381,10 +671,136 @@
         );
       }
 
+      function selectFont(value) {
+        inputs.font.value = value;
+        customFontLabel.hidden = value !== "__custom__";
+        [...fontPresetsEl.querySelectorAll(".font-preset")].forEach((button) => {
+          button.classList.toggle("active", button.dataset.value === value);
+        });
+        draw();
+      }
+
+      function initFontControls() {
+        inputs.font.innerHTML = "";
+        fontPresetsEl.innerHTML = "";
+        fontOptions.forEach((option) => {
+          const selectOption = document.createElement("option");
+          selectOption.value = option.value;
+          selectOption.textContent = option.label;
+          inputs.font.appendChild(selectOption);
+
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "font-preset";
+          button.dataset.value = option.value;
+          const label = document.createElement("span");
+          label.className = "font-label";
+          label.textContent = option.label;
+          const sample = document.createElement("span");
+          sample.className = "font-sample";
+          sample.style.fontFamily = option.css;
+          sample.textContent = option.sample;
+          button.append(label, sample);
+          button.addEventListener("click", () => selectFont(option.value));
+          fontPresetsEl.appendChild(button);
+        });
+        selectFont("");
+      }
+
+      function setIconControlValue(control, value) {
+        [...control.querySelectorAll(".icon-option")].forEach((button) => {
+          button.classList.toggle("active", button.dataset.value === value);
+        });
+      }
+
+      function initIconControls() {
+        alignControl.addEventListener("click", (event) => {
+          const button = event.target.closest(".icon-option");
+          if (!button) {
+            return;
+          }
+          textAlign = button.dataset.value || "center";
+          setIconControlValue(alignControl, textAlign);
+          draw();
+        });
+        valignControl.addEventListener("click", (event) => {
+          const button = event.target.closest(".icon-option");
+          if (!button) {
+            return;
+          }
+          textValign = button.dataset.value || "middle";
+          setIconControlValue(valignControl, textValign);
+          draw();
+        });
+        setIconControlValue(alignControl, textAlign);
+        setIconControlValue(valignControl, textValign);
+      }
+
+      async function loadTemplates() {
+        templateNameInput.value = initialTemplateName;
+        updateTemplateTitle();
+        updateSaveState();
+        if (!task) {
+          setStatus("缺少上传任务。", "error");
+          return;
+        }
+
+        try {
+          const response = await fetch(
+            `/api/plug/astrbot_plugin_customized_invitation/editor/templates?task=${encodeURIComponent(task)}`,
+          );
+          const data = await response.json();
+          if (!response.ok || data.status === "error") {
+            throw new Error(data.message || "读取模版列表失败。");
+          }
+
+          const groups = [
+            ["我的模版", data.user_templates || []],
+            ["全局模版", data.global_templates || []],
+          ];
+          groups.forEach(([label, names]) => {
+            if (!names.length) {
+              return;
+            }
+            const group = document.createElement("optgroup");
+            group.label = label;
+            names.forEach((name) => {
+              const option = document.createElement("option");
+              option.value = name;
+              option.textContent = name;
+              group.appendChild(option);
+            });
+            templateSelect.appendChild(group);
+          });
+
+          const currentName = data.current || initialTemplateName;
+          if (currentName) {
+            templateNameInput.value = currentName;
+            templateSelect.value = currentName;
+          }
+          updateTemplateTitle();
+          updateSaveState();
+        } catch (error) {
+          setStatus(error.message || "读取模版列表失败。", "error");
+        }
+      }
+
+      templateSelect.addEventListener("change", () => {
+        templateNameInput.value = templateSelect.value || "";
+        updateTemplateTitle();
+        updateSaveState();
+      });
+
+      templateNameInput.addEventListener("input", () => {
+        templateSelect.value = templateNameInput.value;
+        updateTemplateTitle();
+        updateSaveState();
+      });
+
       imageInput.addEventListener("change", async () => {
         imageFile = imageInput.files?.[0] || null;
         if (!imageFile) {
-          saveBtn.disabled = true;
+          updateSaveState();
           return;
         }
         bitmap = await createImageBitmap(imageFile);
@@ -398,13 +814,17 @@
         inputs.fontsize.value = Math.max(32, Math.round(bitmap.height / 12));
         syncInputs();
         draw();
-        saveBtn.disabled = false;
+        updateSaveState();
         setStatus("");
       });
 
       ["x", "y", "w", "h"].forEach((key) => {
         inputs[key].addEventListener("input", applyInputRect);
       });
+      ["fontsize", "color", "customFont"].forEach((key) => {
+        inputs[key].addEventListener("input", draw);
+      });
+      inputs.font.addEventListener("change", () => selectFont(inputs.font.value));
 
       canvas.addEventListener("pointerdown", (event) => {
         const point = canvasPoint(event);
@@ -454,6 +874,10 @@
           setStatus("缺少上传任务。", "error");
           return;
         }
+        if (!currentTemplateName()) {
+          setStatus("请填写模版名称。", "error");
+          return;
+        }
         if (!imageFile) {
           setStatus("请选择模版图片。", "error");
           return;
@@ -462,6 +886,7 @@
         setStatus("保存中...");
         const payload = new FormData();
         payload.set("task", task);
+        payload.set("template_name", currentTemplateName());
         payload.set("image", imageFile);
         payload.set("x", String(Math.round(rect.x)));
         payload.set("y", String(Math.round(rect.y)));
@@ -469,10 +894,10 @@
         payload.set("h", String(Math.round(rect.h)));
         payload.set("fontsize", inputs.fontsize.value || "48");
         payload.set("color", inputs.color.value || "#000000");
-        payload.set("align", inputs.align.value || "center");
-        payload.set("valign", inputs.valign.value || "middle");
-        if (inputs.font.value.trim()) {
-          payload.set("font", inputs.font.value.trim());
+        payload.set("align", textAlign);
+        payload.set("valign", textValign);
+        if (currentFontValue()) {
+          payload.set("font", currentFontValue());
         }
 
         try {
@@ -484,16 +909,19 @@
           if (!response.ok || data.status === "error") {
             throw new Error(data.message || "保存失败。");
           }
-          setStatus("已保存。", "ok");
+          setStatus(`已保存模版：${data.template}`, "ok");
         } catch (error) {
           setStatus(error.message || "保存失败。", "error");
         } finally {
-          saveBtn.disabled = false;
+          updateSaveState();
         }
       });
 
+      initFontControls();
+      initIconControls();
       syncInputs();
       draw();
+      loadTemplates();
     </script>
   </body>
 </html>
