@@ -173,19 +173,21 @@ class CustomizedInvitationPlugin(Star):
             JSON response with user and global template names.
         """
         task_token = str(request.query.get("task") or "").strip()
-        task = self.state.get_upload_task(task_token)
-        if not task:
+        task = self.state.get_upload_task(task_token) if task_token else None
+        if task_token and not task:
             return error_response("Upload task is invalid or expired.", status_code=404)
 
-        owner_key = str(task["owner_key"])
-        user_templates = self.manager.list_user_templates(owner_key)
+        user_templates = (
+            self.manager.list_user_templates(str(task["owner_key"])) if task else []
+        )
         global_templates = [
             name for name in self.manager.list_templates() if name not in user_templates
         ]
         return json_response(
             {
                 "status": "ok",
-                "current": str(task["template_name"]),
+                "current": str(task["template_name"]) if task else "",
+                "mode": "user" if task else "global",
                 "user_templates": user_templates,
                 "global_templates": global_templates,
             }
@@ -200,15 +202,15 @@ class CustomizedInvitationPlugin(Star):
         form = await request.form()
         files = await request.files()
         task_token = str(form.get("task") or request.query.get("task") or "").strip()
-        task = self.state.get_upload_task(task_token)
-        if not task:
+        task = self.state.get_upload_task(task_token) if task_token else None
+        if task_token and not task:
             return error_response("Upload task is invalid or expired.", status_code=404)
 
         image_file = files.get("image")
         if image_file is None:
             return error_response("Please upload one template image.")
 
-        upload_path = self.upload_dir / f"{task_token}.upload"
+        upload_path = self.upload_dir / f"{task_token or uuid4().hex}.upload"
         await image_file.save(upload_path)
 
         options: dict[str, str] = {}
@@ -230,14 +232,21 @@ class CustomizedInvitationPlugin(Star):
 
         try:
             template_name = str(
-                form.get("template_name") or task["template_name"]
+                form.get("template_name") or (task["template_name"] if task else "")
             ).strip()
-            template = self.manager.create_for_user_from_image(
-                str(task["owner_key"]),
-                template_name,
-                upload_path,
-                options,
-            )
+            if task:
+                template = self.manager.create_for_user_from_image(
+                    str(task["owner_key"]),
+                    template_name,
+                    upload_path,
+                    options,
+                )
+            else:
+                template = self.manager.create_from_image(
+                    template_name,
+                    upload_path,
+                    options,
+                )
         except TemplateConfigError as err:
             return error_response(str(err), status_code=400)
         finally:

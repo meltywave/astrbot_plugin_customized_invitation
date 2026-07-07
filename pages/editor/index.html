@@ -110,6 +110,13 @@
         font-weight: 650;
       }
 
+      .group-note {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
       label {
         display: grid;
         gap: 6px;
@@ -144,46 +151,28 @@
         gap: 10px;
       }
 
-      .font-presets {
-        display: grid;
-        gap: 8px;
-      }
-
-      .font-preset {
-        display: grid;
-        grid-template-columns: 92px minmax(0, 1fr);
-        align-items: center;
-        gap: 10px;
-        min-height: 46px;
-        padding: 8px 10px;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        background: #ffffff;
-        color: var(--text);
-        text-align: left;
-      }
-
-      .font-preset.active {
-        border-color: var(--accent);
-        background: var(--soft);
-      }
-
-      .font-label {
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      .font-sample {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-size: 18px;
-      }
-
       .icon-control-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 10px;
+      }
+
+      .mode-switch {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .mode-button {
+        border: 1px solid var(--line);
+        background: #ffffff;
+        color: var(--muted);
+      }
+
+      .mode-button.active {
+        border-color: var(--accent);
+        background: var(--soft);
+        color: var(--accent);
       }
 
       .icon-control {
@@ -297,10 +286,14 @@
       <aside class="side">
         <section class="group">
           <p class="group-title">模版</p>
-          <label>
+          <div class="mode-switch" role="tablist" aria-label="模版操作">
+            <button id="newTemplateBtn" class="mode-button active" type="button">新增模版</button>
+            <button id="existingTemplateBtn" class="mode-button" type="button">选择已有</button>
+          </div>
+          <label id="templateSelectLabel" hidden>
             已上传模版
             <select id="templateSelect">
-              <option value="">新增模版</option>
+              <option value="">请选择模版</option>
             </select>
           </label>
           <label>
@@ -318,22 +311,23 @@
         </section>
 
         <section class="group">
-          <p class="group-title">文字区域</p>
+          <p class="group-title">位置与尺寸</p>
+          <p class="group-note">设置文字框在图片中的位置，也可直接拖动画布上的文字框。</p>
           <div class="grid2">
             <label>
-              X
+              左侧位置
               <input id="xInput" type="number" min="0" step="1" />
             </label>
             <label>
-              Y
+              顶部位置
               <input id="yInput" type="number" min="0" step="1" />
             </label>
             <label>
-              宽
+              区域宽度
               <input id="wInput" type="number" min="1" step="1" />
             </label>
             <label>
-              高
+              区域高度
               <input id="hInput" type="number" min="1" step="1" />
             </label>
           </div>
@@ -355,11 +349,6 @@
             字体
             <select id="fontInput"></select>
           </label>
-          <label id="customFontLabel" hidden>
-            自定义字体文件名
-            <input id="customFontInput" type="text" placeholder="my-font.ttf" />
-          </label>
-          <div class="font-presets" id="fontPresets"></div>
           <div class="icon-control-grid">
             <div class="icon-control">
               <span class="icon-control-title">水平</span>
@@ -450,10 +439,11 @@
       const saveBtn = document.getElementById("saveBtn");
       const statusEl = document.getElementById("status");
       const templateSelect = document.getElementById("templateSelect");
+      const templateSelectLabel = document.getElementById("templateSelectLabel");
       const templateNameEl = document.getElementById("templateName");
       const templateNameInput = document.getElementById("templateNameInput");
-      const fontPresetsEl = document.getElementById("fontPresets");
-      const customFontLabel = document.getElementById("customFontLabel");
+      const newTemplateBtn = document.getElementById("newTemplateBtn");
+      const existingTemplateBtn = document.getElementById("existingTemplateBtn");
       const alignControl = document.getElementById("alignControl");
       const valignControl = document.getElementById("valignControl");
 
@@ -462,49 +452,36 @@
           value: "",
           label: "默认字体",
           css: "system-ui, sans-serif",
-          sample: "默认字体预览",
         },
         {
           value: "microsoft_yahei",
           label: "微软雅黑",
           css: '"Microsoft YaHei", "微软雅黑", sans-serif',
-          sample: "微软雅黑预览",
         },
         {
           value: "simhei",
           label: "黑体",
           css: "SimHei, 黑体, sans-serif",
-          sample: "黑体预览",
         },
         {
           value: "simsun",
           label: "宋体",
           css: "SimSun, 宋体, serif",
-          sample: "宋体预览",
         },
         {
           value: "pingfang",
           label: "苹方",
           css: '"PingFang SC", "Hiragino Sans GB", sans-serif',
-          sample: "苹方预览",
         },
         {
           value: "noto_sans_cjk",
           label: "思源黑体",
           css: '"Noto Sans CJK SC", "Source Han Sans SC", sans-serif',
-          sample: "思源黑体预览",
         },
         {
           value: "dejavu_sans",
           label: "DejaVu Sans",
           css: '"DejaVu Sans", sans-serif',
-          sample: "DejaVu Sans",
-        },
-        {
-          value: "__custom__",
-          label: "自定义字体",
-          css: "system-ui, sans-serif",
-          sample: "输入字体文件名",
         },
       ];
 
@@ -516,7 +493,6 @@
         fontsize: document.getElementById("fontSizeInput"),
         color: document.getElementById("colorInput"),
         font: document.getElementById("fontInput"),
-        customFont: document.getElementById("customFontInput"),
       };
 
       let imageFile = null;
@@ -527,6 +503,7 @@
       let dragStart = null;
       let textAlign = "center";
       let textValign = "middle";
+      let templateMode = "new";
 
       function setStatus(text, kind) {
         statusEl.textContent = text || "";
@@ -538,8 +515,9 @@
       }
 
       function updateTemplateTitle() {
+        const modeText = task ? "当前模版" : "全局模版";
         templateNameEl.textContent = currentTemplateName()
-          ? `当前模版：${currentTemplateName()}`
+          ? `${modeText}：${currentTemplateName()}`
           : "未命名模版";
       }
 
@@ -551,14 +529,11 @@
       }
 
       function currentFontValue() {
-        if (inputs.font.value === "__custom__") {
-          return inputs.customFont.value.trim();
-        }
         return inputs.font.value;
       }
 
       function updateSaveState() {
-        saveBtn.disabled = !task || !imageFile || !currentTemplateName();
+        saveBtn.disabled = !imageFile || !currentTemplateName();
       }
 
       function fitCanvas(width, height) {
@@ -673,38 +648,38 @@
 
       function selectFont(value) {
         inputs.font.value = value;
-        customFontLabel.hidden = value !== "__custom__";
-        [...fontPresetsEl.querySelectorAll(".font-preset")].forEach((button) => {
-          button.classList.toggle("active", button.dataset.value === value);
-        });
         draw();
       }
 
       function initFontControls() {
         inputs.font.innerHTML = "";
-        fontPresetsEl.innerHTML = "";
         fontOptions.forEach((option) => {
           const selectOption = document.createElement("option");
           selectOption.value = option.value;
           selectOption.textContent = option.label;
           inputs.font.appendChild(selectOption);
-
-          const button = document.createElement("button");
-          button.type = "button";
-          button.className = "font-preset";
-          button.dataset.value = option.value;
-          const label = document.createElement("span");
-          label.className = "font-label";
-          label.textContent = option.label;
-          const sample = document.createElement("span");
-          sample.className = "font-sample";
-          sample.style.fontFamily = option.css;
-          sample.textContent = option.sample;
-          button.append(label, sample);
-          button.addEventListener("click", () => selectFont(option.value));
-          fontPresetsEl.appendChild(button);
         });
         selectFont("");
+      }
+
+      function setTemplateMode(mode) {
+        templateMode = mode;
+        const isExisting = templateMode === "existing";
+        newTemplateBtn.classList.toggle("active", !isExisting);
+        existingTemplateBtn.classList.toggle("active", isExisting);
+        templateSelectLabel.hidden = !isExisting;
+        templateNameInput.readOnly = isExisting;
+        if (isExisting) {
+          templateNameInput.value = templateSelect.value || "";
+        } else if (
+          templateSelect.value &&
+          templateNameInput.value === templateSelect.value
+        ) {
+          templateSelect.value = "";
+          templateNameInput.value = initialTemplateName || "";
+        }
+        updateTemplateTitle();
+        updateSaveState();
       }
 
       function setIconControlValue(control, value) {
@@ -740,15 +715,12 @@
         templateNameInput.value = initialTemplateName;
         updateTemplateTitle();
         updateSaveState();
-        if (!task) {
-          setStatus("缺少上传任务。", "error");
-          return;
-        }
 
         try {
-          const response = await fetch(
-            `/api/plug/astrbot_plugin_customized_invitation/editor/templates?task=${encodeURIComponent(task)}`,
-          );
+          const templatesUrl = task
+            ? `/api/plug/astrbot_plugin_customized_invitation/editor/templates?task=${encodeURIComponent(task)}`
+            : "/api/plug/astrbot_plugin_customized_invitation/editor/templates";
+          const response = await fetch(templatesUrl);
           const data = await response.json();
           if (!response.ok || data.status === "error") {
             throw new Error(data.message || "读取模版列表失败。");
@@ -777,6 +749,9 @@
           if (currentName) {
             templateNameInput.value = currentName;
             templateSelect.value = currentName;
+            if (templateSelect.value) {
+              setTemplateMode("existing");
+            }
           }
           updateTemplateTitle();
           updateSaveState();
@@ -786,16 +761,25 @@
       }
 
       templateSelect.addEventListener("change", () => {
-        templateNameInput.value = templateSelect.value || "";
+        if (templateMode === "existing") {
+          templateNameInput.value = templateSelect.value || "";
+        }
         updateTemplateTitle();
         updateSaveState();
       });
 
       templateNameInput.addEventListener("input", () => {
-        templateSelect.value = templateNameInput.value;
+        if (templateMode === "new") {
+          templateSelect.value = "";
+        }
         updateTemplateTitle();
         updateSaveState();
       });
+
+      newTemplateBtn.addEventListener("click", () => setTemplateMode("new"));
+      existingTemplateBtn.addEventListener("click", () =>
+        setTemplateMode("existing"),
+      );
 
       imageInput.addEventListener("change", async () => {
         imageFile = imageInput.files?.[0] || null;
@@ -821,7 +805,7 @@
       ["x", "y", "w", "h"].forEach((key) => {
         inputs[key].addEventListener("input", applyInputRect);
       });
-      ["fontsize", "color", "customFont"].forEach((key) => {
+      ["fontsize", "color"].forEach((key) => {
         inputs[key].addEventListener("input", draw);
       });
       inputs.font.addEventListener("change", () => selectFont(inputs.font.value));
@@ -870,10 +854,6 @@
       });
 
       saveBtn.addEventListener("click", async () => {
-        if (!task) {
-          setStatus("缺少上传任务。", "error");
-          return;
-        }
         if (!currentTemplateName()) {
           setStatus("请填写模版名称。", "error");
           return;
@@ -885,7 +865,9 @@
         saveBtn.disabled = true;
         setStatus("保存中...");
         const payload = new FormData();
-        payload.set("task", task);
+        if (task) {
+          payload.set("task", task);
+        }
         payload.set("template_name", currentTemplateName());
         payload.set("image", imageFile);
         payload.set("x", String(Math.round(rect.x)));
@@ -919,6 +901,7 @@
 
       initFontControls();
       initIconControls();
+      setTemplateMode("new");
       syncInputs();
       draw();
       loadTemplates();
