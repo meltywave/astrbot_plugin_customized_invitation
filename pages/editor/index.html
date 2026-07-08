@@ -504,6 +504,8 @@
       let textAlign = "center";
       let textValign = "middle";
       let templateMode = "new";
+      let currentImageDataUrl = "";
+      let templateDetails = {};
 
       function setStatus(text, kind) {
         statusEl.textContent = text || "";
@@ -515,9 +517,8 @@
       }
 
       function updateTemplateTitle() {
-        const modeText = task ? "Current template" : "Global template";
         templateNameEl.textContent = currentTemplateName()
-          ? `${modeText}: ${currentTemplateName()}`
+          ? currentTemplateName()
           : "Unnamed template";
       }
 
@@ -533,7 +534,29 @@
       }
 
       function updateSaveState() {
-        saveBtn.disabled = !imageFile || !currentTemplateName();
+        saveBtn.disabled =
+          (!imageFile && !currentImageDataUrl) || !currentTemplateName();
+      }
+
+      function imageBounds() {
+        return {
+          width: bitmap?.width || Math.max(1, canvas.width / scale),
+          height: bitmap?.height || Math.max(1, canvas.height / scale),
+        };
+      }
+
+      function clampRect() {
+        const bounds = imageBounds();
+        rect.w = Math.min(Math.max(1, rect.w), bounds.width);
+        rect.h = Math.min(Math.max(1, rect.h), bounds.height);
+        rect.x = Math.min(
+          Math.max(0, rect.x),
+          Math.max(0, bounds.width - rect.w),
+        );
+        rect.y = Math.min(
+          Math.max(0, rect.y),
+          Math.max(0, bounds.height - rect.h),
+        );
       }
 
       function fitCanvas(width, height) {
@@ -548,6 +571,7 @@
       }
 
       function syncInputs() {
+        clampRect();
         inputs.x.value = Math.round(rect.x);
         inputs.y.value = Math.round(rect.y);
         inputs.w.value = Math.round(rect.w);
@@ -617,6 +641,8 @@
           w: Math.max(1, Number(inputs.w.value) || 1),
           h: Math.max(1, Number(inputs.h.value) || 1),
         };
+        clampRect();
+        syncInputs();
         draw();
       }
 
@@ -651,6 +677,39 @@
         draw();
       }
 
+      async function loadTemplateDetail(name) {
+        const detail = templateDetails[name];
+        if (!detail) {
+          return;
+        }
+        imageFile = null;
+        imageInput.value = "";
+        currentImageDataUrl = detail.background || "";
+        if (currentImageDataUrl) {
+          const response = await fetch(currentImageDataUrl);
+          const blob = await response.blob();
+          bitmap = await createImageBitmap(blob);
+          fitCanvas(bitmap.width, bitmap.height);
+        }
+        const layer = detail.layer || {};
+        rect = {
+          x: Number(layer.x) || 0,
+          y: Number(layer.y) || 0,
+          w: Number(layer.w) || Math.max(1, detail.width || canvas.width),
+          h: Number(layer.h) || Math.max(1, detail.height || canvas.height),
+        };
+        inputs.fontsize.value = Math.max(8, Number(layer.fontsize) || 48);
+        inputs.color.value = layer.color || "#000000";
+        selectFont(layer.font || "");
+        textAlign = layer.align || "center";
+        textValign = layer.valign || "middle";
+        setIconControlValue(alignControl, textAlign);
+        setIconControlValue(valignControl, textValign);
+        syncInputs();
+        draw();
+        updateSaveState();
+      }
+
       function initFontControls() {
         inputs.font.innerHTML = "";
         fontOptions.forEach((option) => {
@@ -677,6 +736,9 @@
         ) {
           templateSelect.value = "";
           templateNameInput.value = initialTemplateName || "";
+          if (!imageFile) {
+            currentImageDataUrl = "";
+          }
         }
         updateTemplateTitle();
         updateSaveState();
@@ -790,24 +852,17 @@
           if (data.status === "error") {
             throw new Error(data.message || "Failed to load templates.");
           }
+          templateDetails = data.templates || {};
 
-          const groups = [
-            ["My templates", data.user_templates || []],
-            ["Global templates", data.global_templates || []],
+          const names = [
+            ...(data.user_templates || []),
+            ...(data.global_templates || []),
           ];
-          groups.forEach(([label, names]) => {
-            if (!names.length) {
-              return;
-            }
-            const group = document.createElement("optgroup");
-            group.label = label;
-            names.forEach((name) => {
-              const option = document.createElement("option");
-              option.value = name;
-              option.textContent = name;
-              group.appendChild(option);
-            });
-            templateSelect.appendChild(group);
+          [...new Set(names)].forEach((name) => {
+            const option = document.createElement("option");
+            option.value = name;
+            option.textContent = name;
+            templateSelect.appendChild(option);
           });
 
           const currentName = data.current || initialTemplateName;
@@ -816,6 +871,7 @@
             templateSelect.value = currentName;
             if (templateSelect.value) {
               setTemplateMode("existing");
+              await loadTemplateDetail(currentName);
             }
           }
           updateTemplateTitle();
@@ -825,9 +881,12 @@
         }
       }
 
-      templateSelect.addEventListener("change", () => {
+      templateSelect.addEventListener("change", async () => {
         if (templateMode === "existing") {
           templateNameInput.value = templateSelect.value || "";
+          if (templateSelect.value) {
+            await loadTemplateDetail(templateSelect.value);
+          }
         }
         updateTemplateTitle();
         updateSaveState();
@@ -852,6 +911,7 @@
           updateSaveState();
           return;
         }
+        currentImageDataUrl = "";
         bitmap = await createImageBitmap(imageFile);
         fitCanvas(bitmap.width, bitmap.height);
         rect = {
@@ -908,6 +968,7 @@
           rect.w = Math.max(1, Math.abs(dx));
           rect.h = Math.max(1, Math.abs(dy));
         }
+        clampRect();
         syncInputs();
         draw();
       });
@@ -923,7 +984,7 @@
           setStatus("Please enter a template name.", "error");
           return;
         }
-        if (!imageFile) {
+        if (!imageFile && !currentImageDataUrl) {
           setStatus("Please choose a template image.", "error");
           return;
         }
@@ -934,7 +995,9 @@
           payload.task = task;
         }
         payload.template_name = currentTemplateName();
-        payload.image = await readFileAsDataUrl(imageFile);
+        payload.image = imageFile
+          ? await readFileAsDataUrl(imageFile)
+          : currentImageDataUrl;
         payload.x = String(Math.round(rect.x));
         payload.y = String(Math.round(rect.y));
         payload.w = String(Math.round(rect.w));

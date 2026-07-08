@@ -179,12 +179,52 @@ class CustomizedInvitationPlugin(Star):
         if task_token and not task:
             return error_response("Upload task is invalid or expired.", status_code=404)
 
+        template_details = {}
         user_templates = (
             self.manager.list_user_templates(str(task["owner_key"])) if task else []
         )
         global_templates = [
             name for name in self.manager.list_templates() if name not in user_templates
         ]
+        for template_name in [*user_templates, *global_templates]:
+            try:
+                template = (
+                    self.manager.load_for_user(str(task["owner_key"]), template_name)
+                    if task
+                    else self.manager.load(template_name)
+                )
+                layer = next(
+                    (item for item in template.layers if item.type == "text"),
+                    None,
+                )
+                background_data_url = ""
+                if template.background:
+                    background_path = template.directory / template.background
+                    image_bytes = background_path.read_bytes()
+                    background_data_url = "data:image/png;base64," + base64.b64encode(
+                        image_bytes
+                    ).decode("ascii")
+                template_details[template_name] = {
+                    "name": template.name,
+                    "width": template.width,
+                    "height": template.height,
+                    "background": background_data_url,
+                    "layer": {
+                        "x": layer.x if layer else 0,
+                        "y": layer.y if layer else 0,
+                        "w": layer.w if layer else template.width,
+                        "h": layer.h if layer else template.height,
+                        "fontsize": layer.fontsize if layer else 48,
+                        "color": layer.color if layer else "#000000",
+                        "font": layer.font if layer else "",
+                        "align": layer.align if layer else "center",
+                        "valign": layer.valign if layer else "middle",
+                    },
+                }
+            except (OSError, TemplateConfigError) as err:
+                logger.warning(
+                    "Failed to load editor template %s: %s", template_name, err
+                )
         return json_response(
             {
                 "status": "ok",
@@ -192,6 +232,7 @@ class CustomizedInvitationPlugin(Star):
                 "mode": "user" if task else "global",
                 "user_templates": user_templates,
                 "global_templates": global_templates,
+                "templates": template_details,
             }
         )
 
