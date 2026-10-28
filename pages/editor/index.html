@@ -88,6 +88,7 @@
         max-height: calc(100vh - 100px);
         background: #ffffff;
         border: 1px solid var(--line);
+        touch-action: none;
       }
 
       .side {
@@ -466,6 +467,8 @@
       let scale = 1;
       let rect = { x: 96, y: 220, w: 768, h: 96 };
       let fontSize = 48;
+      let rotation = 0;
+      let selected = false;
       let dragMode = "";
       let dragStart = null;
       let textAlign = "center";
@@ -526,6 +529,69 @@
         );
       }
 
+      function textSize(size = fontSize) {
+        ctx.save();
+        ctx.font = `${size * scale}px ${currentFontOption().css}`;
+        const metrics = ctx.measureText("Name preview");
+        ctx.restore();
+        return {
+          w: metrics.width / scale,
+          h:
+            ((metrics.actualBoundingBoxAscent || size * scale * 0.8) +
+              (metrics.actualBoundingBoxDescent || size * scale * 0.2)) /
+              scale +
+            size / 6,
+        };
+      }
+
+      function fitTextHeight(keepCenter = true) {
+        const height = Math.max(1, textSize().h);
+        if (keepCenter) {
+          rect.y += (rect.h - height) / 2;
+        }
+        rect.h = height;
+        clampRect();
+      }
+
+      function rotateVector(x, y, angle = rotation) {
+        const radians = (angle * Math.PI) / 180;
+        return {
+          x: x * Math.cos(radians) - y * Math.sin(radians),
+          y: x * Math.sin(radians) + y * Math.cos(radians),
+        };
+      }
+
+      function localPoint(point) {
+        const center = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
+        const offset = rotateVector(point.x - center.x, point.y - center.y, -rotation);
+        return { x: center.x + offset.x, y: center.y + offset.y };
+      }
+
+      function handleAt(point) {
+        const local = localPoint(point);
+        const radius = 9 / scale;
+        const handles = {
+          nw: [rect.x, rect.y],
+          ne: [rect.x + rect.w, rect.y],
+          se: [rect.x + rect.w, rect.y + rect.h],
+          sw: [rect.x, rect.y + rect.h],
+          left: [rect.x, rect.y + rect.h / 2],
+          right: [rect.x + rect.w, rect.y + rect.h / 2],
+          top: [rect.x + rect.w / 2, rect.y],
+          bottom: [rect.x + rect.w / 2, rect.y + rect.h],
+        };
+        if (selected &&
+            Math.hypot(local.x - rect.x - rect.w / 2, local.y - rect.y - rect.h - 28 / scale) <= radius) {
+          return "rotate";
+        }
+        for (const [name, [x, y]] of Object.entries(handles)) {
+          if (Math.hypot(local.x - x, local.y - y) <= radius) {
+            return name;
+          }
+        }
+        return "";
+      }
+
       function fitCanvas(width, height) {
         const maxWidth = Math.max(
           320,
@@ -548,7 +614,7 @@
         ctx.save();
         ctx.font = `${previewFontSize}px ${fontOption.css}`;
         ctx.fillStyle = inputs.color.value || "#000000";
-        ctx.textBaseline = "middle";
+        ctx.textBaseline = "alphabetic";
         ctx.textAlign = textAlign;
         const textX =
           textAlign === "center"
@@ -556,12 +622,15 @@
             : textAlign === "right"
               ? x + w
               : x;
+        const metrics = ctx.measureText(text);
+        const ascent = metrics.actualBoundingBoxAscent || previewFontSize * 0.8;
+        const descent = metrics.actualBoundingBoxDescent || previewFontSize * 0.2;
         const textY =
           textValign === "top"
-            ? y + previewFontSize / 2
+            ? y + (h - ascent - descent) / 2 + ascent
             : textValign === "bottom"
-              ? y + h - previewFontSize / 2
-              : y + h / 2;
+              ? y + h - (h - ascent - descent) / 2 - descent
+              : y + (h + ascent - descent) / 2;
         ctx.fillText(text, textX, textY, Math.max(1, w));
         ctx.restore();
       }
@@ -580,6 +649,9 @@
         const w = rect.w * scale;
         const h = rect.h * scale;
         ctx.save();
+        ctx.translate(x + w / 2, y + h / 2);
+        ctx.rotate((rotation * Math.PI) / 180);
+        ctx.translate(-x - w / 2, -y - h / 2);
         ctx.strokeStyle = "#176b87";
         ctx.lineWidth = 2;
         ctx.setLineDash([8, 5]);
@@ -587,10 +659,44 @@
         ctx.setLineDash([]);
         ctx.fillStyle = "rgba(23, 107, 135, 0.12)";
         ctx.fillRect(x, y, w, h);
-        ctx.fillStyle = "#176b87";
-        ctx.fillRect(x + w - 10, y + h - 10, 10, 10);
-        ctx.restore();
         drawTextPreview();
+        ctx.setLineDash([]);
+        ctx.fillStyle = "#ffffff";
+        ctx.strokeStyle = "#176b87";
+        ctx.lineWidth = 2;
+        for (const [hx, hy] of [
+          [x, y], [x + w, y], [x + w, y + h], [x, y + h],
+        ]) {
+          ctx.beginPath();
+          ctx.arc(hx, hy, 5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+        for (const [hx, hy, hw, hh] of [
+          [x - 4, y + h / 2 - 9, 8, 18],
+          [x + w - 4, y + h / 2 - 9, 8, 18],
+          [x + w / 2 - 9, y - 4, 18, 8],
+          [x + w / 2 - 9, y + h - 4, 18, 8],
+        ]) {
+          ctx.fillRect(hx, hy, hw, hh);
+          ctx.strokeRect(hx, hy, hw, hh);
+        }
+        if (selected) {
+          const handleY = y + h + 28;
+          ctx.beginPath();
+          ctx.moveTo(x + w / 2, y + h);
+          ctx.lineTo(x + w / 2, handleY - 10);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(x + w / 2, handleY, 9, -Math.PI * 0.75, Math.PI * 0.65);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(x + w / 2 - 6, handleY + 7);
+          ctx.lineTo(x + w / 2 - 2, handleY + 11);
+          ctx.lineTo(x + w / 2 - 1, handleY + 4);
+          ctx.stroke();
+        }
+        ctx.restore();
       }
 
       function canvasPoint(event) {
@@ -607,16 +713,8 @@
         };
       }
 
-      function inResizeHandle(point) {
-        return (
-          point.x >= rect.x + rect.w - 10 / scale &&
-          point.x <= rect.x + rect.w &&
-          point.y >= rect.y + rect.h - 10 / scale &&
-          point.y <= rect.y + rect.h
-        );
-      }
-
       function inRect(point) {
+        point = localPoint(point);
         return (
           point.x >= rect.x &&
           point.x <= rect.x + rect.w &&
@@ -652,6 +750,8 @@
           h: Number(layer.h) || Math.max(1, detail.height || canvas.height),
         };
         fontSize = Math.max(8, Number(layer.fontsize) || 48);
+        rotation = Number(layer.rotation) || 0;
+        selected = false;
         inputs.fontsize.value = Math.round(fontSize);
         inputs.color.value = layer.color || "#000000";
         selectFont(layer.font || "");
@@ -659,7 +759,7 @@
         textValign = layer.valign || "middle";
         setIconControlValue(alignControl, textAlign);
         setIconControlValue(valignControl, textValign);
-        clampRect();
+        fitTextHeight();
         draw();
         updateSaveState();
       }
@@ -868,13 +968,17 @@
         currentImageDataUrl = "";
         bitmap = await createImageBitmap(imageFile);
         fitCanvas(bitmap.width, bitmap.height);
-        rect = {
-          x: Math.round(bitmap.width * 0.1),
-          y: Math.round(bitmap.height * 0.45),
-          w: Math.round(bitmap.width * 0.8),
-          h: Math.max(80, Math.round(bitmap.height * 0.14)),
-        };
         fontSize = Math.max(32, Math.round(bitmap.height / 12));
+        const initialSize = textSize();
+        const boxWidth = Math.min(bitmap.width, Math.ceil(initialSize.w + fontSize / 3));
+        rect = {
+          x: Math.round((bitmap.width - boxWidth) / 2),
+          y: Math.round(bitmap.height * 0.45),
+          w: boxWidth,
+          h: initialSize.h,
+        };
+        rotation = 0;
+        selected = false;
         inputs.fontsize.value = fontSize;
         clampRect();
         draw();
@@ -884,29 +988,151 @@
 
       inputs.fontsize.addEventListener("input", () => {
         fontSize = Math.max(8, Number(inputs.fontsize.value) || 48);
+        fitTextHeight();
         draw();
       });
       inputs.color.addEventListener("input", draw);
-      inputs.font.addEventListener("change", () => selectFont(inputs.font.value));
+      inputs.font.addEventListener("change", () => {
+        fitTextHeight();
+        draw();
+      });
+
+      function rectFromAnchor(start, anchorX, anchorY, width, height) {
+        const center = {
+          x: start.x + start.w / 2,
+          y: start.y + start.h / 2,
+        };
+        const fixed = rotateVector(
+          (anchorX - 0.5) * start.w,
+          (anchorY - 0.5) * start.h,
+          dragStart.rotation,
+        );
+        const anchorGlobal = { x: center.x + fixed.x, y: center.y + fixed.y };
+        const newOffset = rotateVector(
+          (anchorX - 0.5) * width,
+          (anchorY - 0.5) * height,
+          dragStart.rotation,
+        );
+        return {
+          x: anchorGlobal.x - newOffset.x - width / 2,
+          y: anchorGlobal.y - newOffset.y - height / 2,
+          w: width,
+          h: height,
+        };
+      }
+
+      function fitsImage(candidate) {
+        const bounds = imageBounds();
+        const centerX = candidate.x + candidate.w / 2;
+        const centerY = candidate.y + candidate.h / 2;
+        const radians = (rotation * Math.PI) / 180;
+        const extentX =
+          (Math.abs(Math.cos(radians)) * candidate.w +
+            Math.abs(Math.sin(radians)) * candidate.h) / 2;
+        const extentY =
+          (Math.abs(Math.sin(radians)) * candidate.w +
+            Math.abs(Math.cos(radians)) * candidate.h) / 2;
+        return (
+          centerX - extentX >= -1e-8 &&
+          centerX + extentX <= bounds.width + 1e-8 &&
+          centerY - extentY >= -1e-8 &&
+          centerY + extentY <= bounds.height + 1e-8
+        );
+      }
+
+      function resizeWithinImage(start, anchorX, anchorY, width, height, nextFontSize) {
+        const candidate = (amount) => rectFromAnchor(
+          start,
+          anchorX,
+          anchorY,
+          start.w + (width - start.w) * amount,
+          start.h + (height - start.h) * amount,
+        );
+        let amount = 1;
+        if (!fitsImage(candidate(1)) && fitsImage(candidate(0))) {
+          let low = 0;
+          let high = 1;
+          for (let index = 0; index < 25; index += 1) {
+            const middle = (low + high) / 2;
+            if (fitsImage(candidate(middle))) {
+              low = middle;
+            } else {
+              high = middle;
+            }
+          }
+          amount = low;
+        }
+        rect = candidate(amount);
+        fontSize = dragStart.fontSize + (nextFontSize - dragStart.fontSize) * amount;
+        inputs.fontsize.value = Math.round(fontSize);
+      }
+
+      function resizeFromHandle(point) {
+        const start = dragStart.rect;
+        const delta = rotateVector(
+          point.x - dragStart.point.x,
+          point.y - dragStart.point.y,
+          -dragStart.rotation,
+        );
+        const mode = dragMode;
+        if (mode === "left" || mode === "right") {
+          const width = Math.max(16, start.w + delta.x * (mode === "right" ? 1 : -1));
+          resizeWithinImage(start, mode === "left" ? 1 : 0, 0.5, width, start.h, dragStart.fontSize);
+          return;
+        }
+        if (mode === "top" || mode === "bottom") {
+          const height = Math.max(1, start.h + delta.y * (mode === "bottom" ? 1 : -1));
+          const nextFontSize = Math.max(8, dragStart.fontSize * height / start.h);
+          resizeWithinImage(
+            start, 0.5, mode === "top" ? 1 : 0,
+            start.w, textSize(nextFontSize).h, nextFontSize,
+          );
+        } else {
+          const horizontal = delta.x * (mode.includes("e") ? 1 : -1) / start.w;
+          const vertical = delta.y * (mode.startsWith("s") ? 1 : -1) / start.h;
+          const ratio = Math.abs(horizontal) >= Math.abs(vertical) ? horizontal : vertical;
+          const factor = Math.max(8 / dragStart.fontSize, 1 + ratio);
+          resizeWithinImage(
+            start,
+            mode.includes("w") ? 1 : 0,
+            mode.startsWith("n") ? 1 : 0,
+            start.w * factor,
+            start.h * factor,
+            dragStart.fontSize * factor,
+          );
+        }
+      }
 
       canvas.addEventListener("pointerdown", (event) => {
         const point = canvasPoint(event);
-        if (inResizeHandle(point)) {
-          dragMode = "resize";
+        const handle = handleAt(point);
+        if (handle) {
+          dragMode = handle;
         } else if (inRect(point)) {
           dragMode = "move";
         } else {
+          selected = false;
+          draw();
           return;
         }
-        dragStart = { point, rect: { ...rect }, fontSize };
+        selected = true;
+        dragStart = { point, rect: { ...rect }, fontSize, rotation };
         canvas.setPointerCapture(event.pointerId);
+        draw();
       });
 
       canvas.addEventListener("pointermove", (event) => {
         if (!dragMode || !dragStart) {
           const point = canvasPoint(event);
-          canvas.style.cursor = inResizeHandle(point)
-            ? "nwse-resize"
+          const handle = handleAt(point);
+          canvas.style.cursor = handle === "rotate"
+            ? "grab"
+            : handle === "left" || handle === "right"
+              ? "ew-resize"
+              : handle === "top" || handle === "bottom"
+                ? "ns-resize"
+                : handle
+                  ? "nwse-resize"
             : inRect(point)
               ? "move"
               : "default";
@@ -919,29 +1145,16 @@
           rect.x = Math.max(0, dragStart.rect.x + dx);
           rect.y = Math.max(0, dragStart.rect.y + dy);
           clampRect();
-        } else if (dragMode === "resize") {
-          const start = dragStart.rect;
-          const widthChange = dx / start.w;
-          const heightChange = dy / start.h;
-          const requestedScale =
-            1 +
-            (Math.abs(widthChange) >= Math.abs(heightChange)
-              ? widthChange
-              : heightChange);
-          const bounds = imageBounds();
-          const minScale = Math.max(1 / start.w, 1 / start.h, 8 / dragStart.fontSize);
-          const maxScale = Math.min(
-            (bounds.width - start.x) / start.w,
-            (bounds.height - start.y) / start.h,
-          );
-          const resizeScale = Math.max(
-            minScale,
-            Math.min(requestedScale, maxScale),
-          );
-          rect.w = start.w * resizeScale;
-          rect.h = start.h * resizeScale;
-          fontSize = dragStart.fontSize * resizeScale;
-          inputs.fontsize.value = Math.round(fontSize);
+        } else if (dragMode === "rotate") {
+          const center = {
+            x: dragStart.rect.x + dragStart.rect.w / 2,
+            y: dragStart.rect.y + dragStart.rect.h / 2,
+          };
+          const startAngle = Math.atan2(dragStart.point.y - center.y, dragStart.point.x - center.x);
+          const currentAngle = Math.atan2(point.y - center.y, point.x - center.x);
+          rotation = dragStart.rotation + ((currentAngle - startAngle) * 180) / Math.PI;
+        } else {
+          resizeFromHandle(point);
         }
         draw();
       });
@@ -981,6 +1194,7 @@
         payload.w = String(Math.round(rect.w));
         payload.h = String(Math.round(rect.h));
         payload.fontsize = String(Math.round(fontSize));
+        payload.rotation = String(Math.round(rotation));
         payload.color = inputs.color.value || "#000000";
         payload.align = textAlign;
         payload.valign = textValign;
@@ -1004,7 +1218,7 @@
       initFontControls();
       initIconControls();
       setTemplateMode("new");
-      clampRect();
+      fitTextHeight();
       draw();
       loadTemplates();
     </script>

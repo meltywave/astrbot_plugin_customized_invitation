@@ -19,6 +19,7 @@ class TextLayer:
         align: Horizontal alignment, left, center, or right.
         valign: Vertical alignment, top, middle, or bottom.
         color: Text color in hex format.
+        rotation: Clockwise rotation in degrees around the box center.
         required: Whether this field must be provided by the user.
         default: Default text when the field is omitted.
     """
@@ -34,6 +35,7 @@ class TextLayer:
     align: str = "left"
     valign: str = "top"
     color: str = "#000000"
+    rotation: int = 0
     required: bool = True
     default: str = ""
     type: str = field(default="text", init=False)

@@ -215,6 +215,7 @@ class CustomizedInvitationPlugin(Star):
                         "w": layer.w if layer else template.width,
                         "h": layer.h if layer else template.height,
                         "fontsize": layer.fontsize if layer else 48,
+                        "rotation": layer.rotation if layer else 0,
                         "color": layer.color if layer else "#000000",
                         "font": layer.font if layer else "",
                         "align": layer.align if layer else "center",
@@ -288,6 +289,7 @@ class CustomizedInvitationPlugin(Star):
             "w",
             "h",
             "fontsize",
+            "rotation",
             "align",
             "valign",
             "color",
@@ -337,6 +339,7 @@ class CustomizedInvitationPlugin(Star):
                     "w": layer.w,
                     "h": layer.h,
                     "fontsize": layer.fontsize,
+                    "rotation": layer.rotation,
                     "color": layer.color,
                 },
             }

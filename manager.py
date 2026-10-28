@@ -291,6 +291,7 @@ class TemplateManager:
             "h",
             "font",
             "fontsize",
+            "rotation",
             "align",
             "valign",
             "color",
@@ -398,6 +399,7 @@ class TemplateManager:
             fontsize=self._positive_int(
                 raw.get("fontsize", 48), f"{layer_id}.fontsize"
             ),
+            rotation=self._int(raw.get("rotation", 0), f"{layer_id}.rotation"),
             align=align,
             valign=valign,
             color=str(raw.get("color") or "#000000"),
@@ -433,6 +435,7 @@ class TemplateManager:
             "w": options.get("w", str(default_width * 8 // 10)),
             "h": options.get("h", str(max(80, default_height // 8))),
             "fontsize": options.get("fontsize", str(max(32, default_height // 12))),
+            "rotation": options.get("rotation", "0"),
             "align": options.get("align", "center"),
             "valign": options.get("valign", "middle"),
             "color": options.get("color", "#000000"),
@@ -461,6 +464,7 @@ class TemplateManager:
             "w": layer.w,
             "h": layer.h,
             "fontsize": layer.fontsize,
+            "rotation": layer.rotation,
             "align": layer.align,
             "valign": layer.valign,
             "color": layer.color,

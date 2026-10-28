@@ -31,7 +31,19 @@ class TemplateRenderer:
         draw = ImageDraw.Draw(image)
         for layer in template.layers:
             if layer.type == "text":
-                self._render_text_layer(draw, layer, data)
+                if layer.rotation:
+                    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+                    self._render_text_layer(ImageDraw.Draw(overlay), layer, data)
+                    center = (layer.x + layer.w / 2, layer.y + layer.h / 2)
+                    image.alpha_composite(
+                        overlay.rotate(
+                            -layer.rotation,
+                            resample=Image.Resampling.BICUBIC,
+                            center=center,
+                        )
+                    )
+                else:
+                    self._render_text_layer(draw, layer, data)
                 continue
             raise RenderError(f"Unsupported layer type: {layer.type}")
         return image
