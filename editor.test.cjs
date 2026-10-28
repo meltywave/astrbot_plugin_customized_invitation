@@ -30,10 +30,10 @@ function createEditor(templateData = { templates: {} }) {
     lineTo() {},
     fill() {},
     stroke() {},
-    measureText() {
+    measureText(text) {
       const size = parseFloat(this.font);
       return {
-        width: size * 7,
+        width: size * Array.from(text).length * 0.6,
         actualBoundingBoxAscent: size * 0.8,
         actualBoundingBoxDescent: size * 0.2,
       };
@@ -41,8 +41,8 @@ function createEditor(templateData = { templates: {} }) {
     strokeRect(x, y, w, h) {
       strokes.push({ x, y, w, h });
     },
-    fillText(text) {
-      textDraws.push({ text, font: this.font });
+    fillText(text, x, y, maxWidth) {
+      textDraws.push({ text, font: this.font, maxWidth });
     },
   };
 
@@ -278,22 +278,43 @@ test("left and right handles change only width", () => {
   }
 });
 
-test("top and bottom handles change font size with tight box height", () => {
-  for (const side of ["top", "bottom"]) {
+test("top and bottom edges have no resize handles", () => {
+  const editor = createEditor();
+  const box = editor.state();
+  const x = box.x + box.w / 2;
+  assert.equal(editor.evaluate(`handleAt({ x: ${x}, y: ${box.y} })`), "");
+  assert.equal(editor.evaluate(`handleAt({ x: ${x}, y: ${box.y + box.h} })`), "");
+});
+
+test("narrowing either side wraps text without changing glyph size", () => {
+  for (const side of ["left", "right"]) {
     const editor = createEditor();
     const before = editor.state();
-    const x = before.x + before.w / 2;
-    const y = side === "top" ? before.y : before.y + before.h;
-    const change = side === "top" ? -10 : 10;
+    const x = side === "left" ? before.x : before.x + before.w;
+    const y = before.y + before.h / 2;
+    const dx = side === "left" ? 630 : -630;
     editor.pointer("pointerdown", x, y);
-    editor.pointer("pointermove", x, y + change);
-    editor.pointer("pointerup", x, y + change);
+    editor.pointer("pointermove", x + dx, y);
+    editor.pointer("pointerup", x + dx, y);
     const after = editor.state();
-    assert.equal(after.w, before.w);
+    const lines = Array.from(editor.evaluate("textSize().lines"));
+    assert.equal(after.fontSize, before.fontSize);
+    assert.equal(after.w, before.w - 630);
+    assert.ok(lines.length > 1);
     assert.ok(after.h > before.h);
-    assert.ok(after.fontSize > before.fontSize);
-    assert.ok(Math.abs(after.h - after.fontSize * 7 / 6) < 1e-8);
+    assert.ok(Math.abs(after.h - editor.evaluate("textSize().h")) < 1e-8);
+    assert.ok(editor.textDraws.slice(-lines.length).every((draw) =>
+      draw.maxWidth === undefined && parseFloat(draw.font) === before.fontSize
+    ));
   }
+});
+
+test("a word that fits without its trailing space does not add a blank line", () => {
+  const editor = createEditor();
+  const lines = Array.from(editor.evaluate(
+    "wrapText('Hello world', 130, (value) => value.length * 25)",
+  ));
+  assert.deepEqual(lines, ["Hello", "world"]);
 });
 
 test("all corners scale around their opposite corner", () => {
@@ -360,7 +381,7 @@ test("new images start with a snug text box", async () => {
 
 test("rotated side handle resizes along the box axis", () => {
   const editor = createEditor();
-  editor.evaluate("rect = { x: 300, y: 200, w: 200, h: 56 }; rotation = 90; selected = true; draw()");
+  editor.evaluate("rect = { x: 300, y: 200, w: 400, h: 56 }; rotation = 90; selected = true; draw()");
   const before = editor.state();
   const centerX = before.x + before.w / 2;
   const centerY = before.y + before.h / 2;
@@ -369,10 +390,38 @@ test("rotated side handle resizes along the box axis", () => {
   editor.pointer("pointermove", centerX, handleY + 20);
   editor.pointer("pointerup", centerX, handleY + 20);
   const after = editor.state();
-  assert.ok(Math.abs(after.w - 220) < 1e-8);
+  assert.ok(Math.abs(after.w - 420) < 1e-8);
   assert.ok(Math.abs(after.h - before.h) < 1e-8);
   assert.equal(after.fontSize, before.fontSize);
   assert.equal(after.rotation, 90);
+});
+
+test("corner cursors reflect diagonal and rotated resize directions", () => {
+  const editor = createEditor();
+  const box = editor.state();
+  for (const [x, y, expected] of [
+    [box.x, box.y, "nwse-resize"],
+    [box.x + box.w, box.y, "nesw-resize"],
+    [box.x + box.w, box.y + box.h, "nwse-resize"],
+    [box.x, box.y + box.h, "nesw-resize"],
+  ]) {
+    editor.pointer("pointermove", x, y);
+    assert.equal(editor.canvas.style.cursor, expected);
+  }
+
+  editor.evaluate("rotation = 45");
+  for (const [localX, localY, expected] of [
+    [box.x, box.y, "ns-resize"],
+    [box.x + box.w, box.y, "ew-resize"],
+    [box.x + box.w, box.y + box.h, "ns-resize"],
+    [box.x, box.y + box.h, "ew-resize"],
+  ]) {
+    const centerX = box.x + box.w / 2;
+    const centerY = box.y + box.h / 2;
+    const point = editor.evaluate(`rotateVector(${localX - centerX}, ${localY - centerY})`);
+    editor.pointer("pointermove", centerX + point.x, centerY + point.y);
+    assert.equal(editor.canvas.style.cursor, expected);
+  }
 });
 
 test("saved rotation is restored when an existing template loads", async () => {

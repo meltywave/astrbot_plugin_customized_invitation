@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from PIL import Image, ImageColor, ImageDraw, ImageFont, UnidentifiedImageError
@@ -102,31 +103,79 @@ class TemplateRenderer:
         text = data.get(layer.field, layer.default).strip()
         if not text and layer.required:
             raise ValueError(f"Missing required field: {layer.field}")
+        if not text:
+            return
 
         font = self._load_font(layer)
-        bbox = draw.textbbox((0, 0), text, font=font)
-        text_width = bbox[2] - bbox[0]
-        text_height = bbox[3] - bbox[1]
-
-        if layer.align == "center":
-            x = layer.x + (layer.w - text_width) / 2
-        elif layer.align == "right":
-            x = layer.x + layer.w - text_width
-        else:
-            x = layer.x
-
+        lines = self._wrap_text(draw, text, font, layer.w)
+        boxes = [draw.textbbox((0, 0), line or " ", font=font) for line in lines]
+        line_height = max(1, round(layer.fontsize * 1.2))
+        top = min(box[1] + index * line_height for index, box in enumerate(boxes))
+        bottom = max(box[3] + index * line_height for index, box in enumerate(boxes))
+        spare_height = max(0, layer.h - (bottom - top))
         if layer.valign == "middle":
-            y = layer.y + (layer.h - text_height) / 2 - bbox[1]
+            offset_y = spare_height / 2
         elif layer.valign == "bottom":
-            y = layer.y + layer.h - text_height - bbox[1]
+            offset_y = spare_height
         else:
-            y = layer.y - bbox[1]
+            offset_y = 0
 
         try:
             fill = ImageColor.getrgb(layer.color)
         except ValueError as err:
             raise RenderError(f"Layer {layer.id} color is invalid.") from err
-        draw.text((x, y), text, font=font, fill=fill)
+        for index, (line, box) in enumerate(zip(lines, boxes)):
+            text_width = box[2] - box[0]
+            if layer.align == "center":
+                x = layer.x + (layer.w - text_width) / 2
+            elif layer.align == "right":
+                x = layer.x + layer.w - text_width
+            else:
+                x = layer.x
+            draw.text(
+                (x, layer.y + offset_y - top + index * line_height),
+                line,
+                font=font,
+                fill=fill,
+            )
+
+    def _wrap_text(
+        self,
+        draw: ImageDraw.ImageDraw,
+        text: str,
+        font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+        width: int,
+    ) -> list[str]:
+        """Wrap words when possible and split oversized tokens by character."""
+        def measure(value: str) -> int:
+            bounds = draw.textbbox((0, 0), value, font=font)
+            return bounds[2] - bounds[0]
+
+        lines: list[str] = []
+        for paragraph in text.splitlines():
+            line = ""
+            tokens = re.findall(
+                r"[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)*[ \t]*|[^\r\n]",
+                paragraph,
+            )
+            for token in tokens:
+                if measure(line + token) <= width:
+                    line += token
+                    continue
+                if line:
+                    lines.append(line.rstrip())
+                    line = ""
+                token = token.lstrip()
+                if measure(token.rstrip()) <= width:
+                    line = token
+                    continue
+                for character in token.rstrip():
+                    if line and measure(line + character) > width:
+                        lines.append(line.rstrip())
+                        line = ""
+                    line += character
+            lines.append(line.rstrip())
+        return lines
 
     def _load_font(
         self, layer: TextLayer

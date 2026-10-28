@@ -476,6 +476,7 @@
       let templateMode = "new";
       let currentImageDataUrl = "";
       let templateDetails = {};
+      const previewText = "Name preview";
 
       function setStatus(text, kind) {
         statusEl.textContent = text || "";
@@ -529,18 +530,58 @@
         );
       }
 
-      function textSize(size = fontSize) {
+      function wrapText(text, maxWidth, measure) {
+        const lines = [];
+        for (const paragraph of text.split(/\r?\n/)) {
+          let line = "";
+          const tokens = paragraph.match(/[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)*[ \t]*|[^\r\n]/gu) || [];
+          for (let token of tokens) {
+            if (measure(line + token) <= maxWidth) {
+              line += token;
+              continue;
+            }
+            if (line) {
+              lines.push(line.trimEnd());
+              line = "";
+            }
+            token = token.trimStart();
+            if (measure(token.trimEnd()) <= maxWidth) {
+              line = token;
+              continue;
+            }
+            for (const character of Array.from(token.trimEnd())) {
+              if (line && measure(line + character) > maxWidth) {
+                lines.push(line.trimEnd());
+                line = "";
+              }
+              line += character;
+            }
+          }
+          lines.push(line.trimEnd());
+        }
+        return lines;
+      }
+
+      function textSize(size = fontSize, width = rect.w) {
         ctx.save();
         ctx.font = `${size * scale}px ${currentFontOption().css}`;
-        const metrics = ctx.measureText("Name preview");
+        const metrics = ctx.measureText(previewText);
+        const lines = wrapText(
+          previewText,
+          width * scale,
+          (value) => ctx.measureText(value).width,
+        );
         ctx.restore();
+        const ascent = (metrics.actualBoundingBoxAscent || size * scale * 0.8) / scale;
+        const descent = (metrics.actualBoundingBoxDescent || size * scale * 0.2) / scale;
+        const lineHeight = size * 1.2;
         return {
           w: metrics.width / scale,
-          h:
-            ((metrics.actualBoundingBoxAscent || size * scale * 0.8) +
-              (metrics.actualBoundingBoxDescent || size * scale * 0.2)) /
-              scale +
-            size / 6,
+          h: ascent + descent + (lines.length - 1) * lineHeight + size / 6,
+          ascent,
+          descent,
+          lineHeight,
+          lines,
         };
       }
 
@@ -577,8 +618,6 @@
           sw: [rect.x, rect.y + rect.h],
           left: [rect.x, rect.y + rect.h / 2],
           right: [rect.x + rect.w, rect.y + rect.h / 2],
-          top: [rect.x + rect.w / 2, rect.y],
-          bottom: [rect.x + rect.w / 2, rect.y + rect.h],
         };
         if (selected &&
             Math.hypot(local.x - rect.x - rect.w / 2, local.y - rect.y - rect.h - 28 / scale) <= radius) {
@@ -604,7 +643,7 @@
       }
 
       function drawTextPreview() {
-        const text = "Name preview";
+        const layout = textSize();
         const previewFontSize = fontSize * scale;
         const x = rect.x * scale;
         const y = rect.y * scale;
@@ -622,16 +661,17 @@
             : textAlign === "right"
               ? x + w
               : x;
-        const metrics = ctx.measureText(text);
-        const ascent = metrics.actualBoundingBoxAscent || previewFontSize * 0.8;
-        const descent = metrics.actualBoundingBoxDescent || previewFontSize * 0.2;
-        const textY =
-          textValign === "top"
-            ? y + (h - ascent - descent) / 2 + ascent
-            : textValign === "bottom"
-              ? y + h - (h - ascent - descent) / 2 - descent
-              : y + (h + ascent - descent) / 2;
-        ctx.fillText(text, textX, textY, Math.max(1, w));
+        const padding = previewFontSize / 12;
+        const contentHeight =
+          (layout.ascent + layout.descent +
+            (layout.lines.length - 1) * layout.lineHeight) * scale;
+        const extra = Math.max(0, h - contentHeight - padding * 2);
+        const offset =
+          textValign === "bottom" ? extra : textValign === "middle" ? extra / 2 : 0;
+        const firstY = y + padding + offset + layout.ascent * scale;
+        layout.lines.forEach((line, index) => {
+          ctx.fillText(line, textX, firstY + index * layout.lineHeight * scale);
+        });
         ctx.restore();
       }
 
@@ -675,8 +715,6 @@
         for (const [hx, hy, hw, hh] of [
           [x - 4, y + h / 2 - 9, 8, 18],
           [x + w - 4, y + h / 2 - 9, 8, 18],
-          [x + w / 2 - 9, y - 4, 18, 8],
-          [x + w / 2 - 9, y + h - 4, 18, 8],
         ]) {
           ctx.fillRect(hx, hy, hw, hh);
           ctx.strokeRect(hx, hy, hw, hh);
@@ -969,13 +1007,13 @@
         bitmap = await createImageBitmap(imageFile);
         fitCanvas(bitmap.width, bitmap.height);
         fontSize = Math.max(32, Math.round(bitmap.height / 12));
-        const initialSize = textSize();
+        const initialSize = textSize(fontSize, bitmap.width);
         const boxWidth = Math.min(bitmap.width, Math.ceil(initialSize.w + fontSize / 3));
         rect = {
           x: Math.round((bitmap.width - boxWidth) / 2),
           y: Math.round(bitmap.height * 0.45),
           w: boxWidth,
-          h: initialSize.h,
+          h: textSize(fontSize, boxWidth).h,
         };
         rotation = 0;
         selected = false;
@@ -1040,14 +1078,14 @@
         );
       }
 
-      function resizeWithinImage(start, anchorX, anchorY, width, height, nextFontSize) {
-        const candidate = (amount) => rectFromAnchor(
-          start,
-          anchorX,
-          anchorY,
-          start.w + (width - start.w) * amount,
-          start.h + (height - start.h) * amount,
-        );
+      function resizeWithinImage(start, anchorX, anchorY, width, height, nextFontSize, heightForWidth) {
+        const candidate = (amount) => {
+          const candidateWidth = start.w + (width - start.w) * amount;
+          const candidateHeight = heightForWidth
+            ? heightForWidth(candidateWidth)
+            : start.h + (height - start.h) * amount;
+          return rectFromAnchor(start, anchorX, anchorY, candidateWidth, candidateHeight);
+        };
         let amount = 1;
         if (!fitsImage(candidate(1)) && fitsImage(candidate(0))) {
           let low = 0;
@@ -1076,31 +1114,40 @@
         );
         const mode = dragMode;
         if (mode === "left" || mode === "right") {
-          const width = Math.max(16, start.w + delta.x * (mode === "right" ? 1 : -1));
-          resizeWithinImage(start, mode === "left" ? 1 : 0, 0.5, width, start.h, dragStart.fontSize);
+          const width = Math.max(
+            dragStart.fontSize,
+            start.w + delta.x * (mode === "right" ? 1 : -1),
+          );
+          resizeWithinImage(
+            start, mode === "left" ? 1 : 0, 0.5,
+            width, start.h, dragStart.fontSize,
+            (candidateWidth) => textSize(dragStart.fontSize, candidateWidth).h,
+          );
           return;
         }
-        if (mode === "top" || mode === "bottom") {
-          const height = Math.max(1, start.h + delta.y * (mode === "bottom" ? 1 : -1));
-          const nextFontSize = Math.max(8, dragStart.fontSize * height / start.h);
-          resizeWithinImage(
-            start, 0.5, mode === "top" ? 1 : 0,
-            start.w, textSize(nextFontSize).h, nextFontSize,
-          );
-        } else {
-          const horizontal = delta.x * (mode.includes("e") ? 1 : -1) / start.w;
-          const vertical = delta.y * (mode.startsWith("s") ? 1 : -1) / start.h;
-          const ratio = Math.abs(horizontal) >= Math.abs(vertical) ? horizontal : vertical;
-          const factor = Math.max(8 / dragStart.fontSize, 1 + ratio);
-          resizeWithinImage(
-            start,
-            mode.includes("w") ? 1 : 0,
-            mode.startsWith("n") ? 1 : 0,
-            start.w * factor,
-            start.h * factor,
-            dragStart.fontSize * factor,
-          );
+        const horizontal = delta.x * (mode.includes("e") ? 1 : -1) / start.w;
+        const vertical = delta.y * (mode.startsWith("s") ? 1 : -1) / start.h;
+        const ratio = Math.abs(horizontal) >= Math.abs(vertical) ? horizontal : vertical;
+        const factor = Math.max(8 / dragStart.fontSize, 1 + ratio);
+        resizeWithinImage(
+          start,
+          mode.includes("w") ? 1 : 0,
+          mode.startsWith("n") ? 1 : 0,
+          start.w * factor,
+          start.h * factor,
+          dragStart.fontSize * factor,
+        );
+      }
+
+      function cursorForHandle(handle) {
+        if (handle === "rotate") {
+          return "grab";
         }
+        const baseAngle = handle === "left" || handle === "right"
+          ? 0
+          : handle === "nw" || handle === "se" ? 45 : 135;
+        const index = ((Math.round((baseAngle + rotation) / 45) % 4) + 4) % 4;
+        return ["ew-resize", "nwse-resize", "ns-resize", "nesw-resize"][index];
       }
 
       canvas.addEventListener("pointerdown", (event) => {
@@ -1125,17 +1172,9 @@
         if (!dragMode || !dragStart) {
           const point = canvasPoint(event);
           const handle = handleAt(point);
-          canvas.style.cursor = handle === "rotate"
-            ? "grab"
-            : handle === "left" || handle === "right"
-              ? "ew-resize"
-              : handle === "top" || handle === "bottom"
-                ? "ns-resize"
-                : handle
-                  ? "nwse-resize"
-            : inRect(point)
-              ? "move"
-              : "default";
+          canvas.style.cursor = handle
+            ? cursorForHandle(handle)
+            : inRect(point) ? "move" : "default";
           return;
         }
         const point = canvasPoint(event);
