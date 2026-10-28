@@ -110,13 +110,6 @@
         font-weight: 650;
       }
 
-      .group-note {
-        margin: 0;
-        color: var(--muted);
-        font-size: 12px;
-        line-height: 1.45;
-      }
-
       label {
         display: grid;
         gap: 6px;
@@ -311,29 +304,6 @@
         </section>
 
         <section class="group">
-          <p class="group-title">位置与尺寸</p>
-          <p class="group-note">设置文字框在图片中的位置，也可直接拖动画布上的文字框。</p>
-          <div class="grid2">
-            <label>
-              左侧位置
-              <input id="xInput" type="number" min="0" step="1" />
-            </label>
-            <label>
-              顶部位置
-              <input id="yInput" type="number" min="0" step="1" />
-            </label>
-            <label>
-              区域宽度
-              <input id="wInput" type="number" min="1" step="1" />
-            </label>
-            <label>
-              区域高度
-              <input id="hInput" type="number" min="1" step="1" />
-            </label>
-          </div>
-        </section>
-
-        <section class="group">
           <p class="group-title">文字样式</p>
           <div class="grid2">
             <label>
@@ -486,10 +456,6 @@
       ];
 
       const inputs = {
-        x: document.getElementById("xInput"),
-        y: document.getElementById("yInput"),
-        w: document.getElementById("wInput"),
-        h: document.getElementById("hInput"),
         fontsize: document.getElementById("fontSizeInput"),
         color: document.getElementById("colorInput"),
         font: document.getElementById("fontInput"),
@@ -499,6 +465,7 @@
       let bitmap = null;
       let scale = 1;
       let rect = { x: 96, y: 220, w: 768, h: 96 };
+      let fontSize = 48;
       let dragMode = "";
       let dragStart = null;
       let textAlign = "center";
@@ -570,24 +537,16 @@
         canvas.height = Math.round(height * scale);
       }
 
-      function syncInputs() {
-        clampRect();
-        inputs.x.value = Math.round(rect.x);
-        inputs.y.value = Math.round(rect.y);
-        inputs.w.value = Math.round(rect.w);
-        inputs.h.value = Math.round(rect.h);
-      }
-
       function drawTextPreview() {
         const text = "Name preview";
-        const fontSize = Math.max(8, Number(inputs.fontsize.value) || 48) * scale;
+        const previewFontSize = fontSize * scale;
         const x = rect.x * scale;
         const y = rect.y * scale;
         const w = rect.w * scale;
         const h = rect.h * scale;
         const fontOption = currentFontOption();
         ctx.save();
-        ctx.font = `${fontSize}px ${fontOption.css}`;
+        ctx.font = `${previewFontSize}px ${fontOption.css}`;
         ctx.fillStyle = inputs.color.value || "#000000";
         ctx.textBaseline = "middle";
         ctx.textAlign = textAlign;
@@ -599,9 +558,9 @@
               : x;
         const textY =
           textValign === "top"
-            ? y + fontSize / 2
+            ? y + previewFontSize / 2
             : textValign === "bottom"
-              ? y + h - fontSize / 2
+              ? y + h - previewFontSize / 2
               : y + h / 2;
         ctx.fillText(text, textX, textY, Math.max(1, w));
         ctx.restore();
@@ -634,32 +593,26 @@
         drawTextPreview();
       }
 
-      function applyInputRect() {
-        rect = {
-          x: Math.max(0, Number(inputs.x.value) || 0),
-          y: Math.max(0, Number(inputs.y.value) || 0),
-          w: Math.max(1, Number(inputs.w.value) || 1),
-          h: Math.max(1, Number(inputs.h.value) || 1),
-        };
-        clampRect();
-        syncInputs();
-        draw();
-      }
-
       function canvasPoint(event) {
         const box = canvas.getBoundingClientRect();
         return {
-          x: (event.clientX - box.left) / scale,
-          y: (event.clientY - box.top) / scale,
+          x:
+            ((event.clientX - box.left - canvas.clientLeft) * canvas.width) /
+            canvas.clientWidth /
+            scale,
+          y:
+            ((event.clientY - box.top - canvas.clientTop) * canvas.height) /
+            canvas.clientHeight /
+            scale,
         };
       }
 
       function inResizeHandle(point) {
         return (
-          point.x >= rect.x + rect.w - 18 &&
-          point.x <= rect.x + rect.w + 6 &&
-          point.y >= rect.y + rect.h - 18 &&
-          point.y <= rect.y + rect.h + 6
+          point.x >= rect.x + rect.w - 10 / scale &&
+          point.x <= rect.x + rect.w &&
+          point.y >= rect.y + rect.h - 10 / scale &&
+          point.y <= rect.y + rect.h
         );
       }
 
@@ -698,14 +651,15 @@
           w: Number(layer.w) || Math.max(1, detail.width || canvas.width),
           h: Number(layer.h) || Math.max(1, detail.height || canvas.height),
         };
-        inputs.fontsize.value = Math.max(8, Number(layer.fontsize) || 48);
+        fontSize = Math.max(8, Number(layer.fontsize) || 48);
+        inputs.fontsize.value = Math.round(fontSize);
         inputs.color.value = layer.color || "#000000";
         selectFont(layer.font || "");
         textAlign = layer.align || "center";
         textValign = layer.valign || "middle";
         setIconControlValue(alignControl, textAlign);
         setIconControlValue(valignControl, textValign);
-        syncInputs();
+        clampRect();
         draw();
         updateSaveState();
       }
@@ -920,19 +874,19 @@
           w: Math.round(bitmap.width * 0.8),
           h: Math.max(80, Math.round(bitmap.height * 0.14)),
         };
-        inputs.fontsize.value = Math.max(32, Math.round(bitmap.height / 12));
-        syncInputs();
+        fontSize = Math.max(32, Math.round(bitmap.height / 12));
+        inputs.fontsize.value = fontSize;
+        clampRect();
         draw();
         updateSaveState();
         setStatus("");
       });
 
-      ["x", "y", "w", "h"].forEach((key) => {
-        inputs[key].addEventListener("input", applyInputRect);
+      inputs.fontsize.addEventListener("input", () => {
+        fontSize = Math.max(8, Number(inputs.fontsize.value) || 48);
+        draw();
       });
-      ["fontsize", "color"].forEach((key) => {
-        inputs[key].addEventListener("input", draw);
-      });
+      inputs.color.addEventListener("input", draw);
       inputs.font.addEventListener("change", () => selectFont(inputs.font.value));
 
       canvas.addEventListener("pointerdown", (event) => {
@@ -942,15 +896,20 @@
         } else if (inRect(point)) {
           dragMode = "move";
         } else {
-          dragMode = "draw";
-          rect = { x: point.x, y: point.y, w: 1, h: 1 };
+          return;
         }
-        dragStart = { point, rect: { ...rect } };
+        dragStart = { point, rect: { ...rect }, fontSize };
         canvas.setPointerCapture(event.pointerId);
       });
 
       canvas.addEventListener("pointermove", (event) => {
         if (!dragMode || !dragStart) {
+          const point = canvasPoint(event);
+          canvas.style.cursor = inResizeHandle(point)
+            ? "nwse-resize"
+            : inRect(point)
+              ? "move"
+              : "default";
           return;
         }
         const point = canvasPoint(event);
@@ -959,25 +918,44 @@
         if (dragMode === "move") {
           rect.x = Math.max(0, dragStart.rect.x + dx);
           rect.y = Math.max(0, dragStart.rect.y + dy);
+          clampRect();
         } else if (dragMode === "resize") {
-          rect.w = Math.max(1, dragStart.rect.w + dx);
-          rect.h = Math.max(1, dragStart.rect.h + dy);
-        } else {
-          rect.x = Math.min(dragStart.point.x, point.x);
-          rect.y = Math.min(dragStart.point.y, point.y);
-          rect.w = Math.max(1, Math.abs(dx));
-          rect.h = Math.max(1, Math.abs(dy));
+          const start = dragStart.rect;
+          const widthChange = dx / start.w;
+          const heightChange = dy / start.h;
+          const requestedScale =
+            1 +
+            (Math.abs(widthChange) >= Math.abs(heightChange)
+              ? widthChange
+              : heightChange);
+          const bounds = imageBounds();
+          const minScale = Math.max(1 / start.w, 1 / start.h, 8 / dragStart.fontSize);
+          const maxScale = Math.min(
+            (bounds.width - start.x) / start.w,
+            (bounds.height - start.y) / start.h,
+          );
+          const resizeScale = Math.max(
+            minScale,
+            Math.min(requestedScale, maxScale),
+          );
+          rect.w = start.w * resizeScale;
+          rect.h = start.h * resizeScale;
+          fontSize = dragStart.fontSize * resizeScale;
+          inputs.fontsize.value = Math.round(fontSize);
         }
-        clampRect();
-        syncInputs();
         draw();
       });
 
-      canvas.addEventListener("pointerup", (event) => {
+      function endDrag(event) {
         dragMode = "";
         dragStart = null;
-        canvas.releasePointerCapture(event.pointerId);
-      });
+        if (canvas.hasPointerCapture(event.pointerId)) {
+          canvas.releasePointerCapture(event.pointerId);
+        }
+      }
+
+      canvas.addEventListener("pointerup", endDrag);
+      canvas.addEventListener("pointercancel", endDrag);
 
       saveBtn.addEventListener("click", async () => {
         if (!currentTemplateName()) {
@@ -1002,7 +980,7 @@
         payload.y = String(Math.round(rect.y));
         payload.w = String(Math.round(rect.w));
         payload.h = String(Math.round(rect.h));
-        payload.fontsize = inputs.fontsize.value || "48";
+        payload.fontsize = String(Math.round(fontSize));
         payload.color = inputs.color.value || "#000000";
         payload.align = textAlign;
         payload.valign = textValign;
@@ -1026,7 +1004,7 @@
       initFontControls();
       initIconControls();
       setTemplateMode("new");
-      syncInputs();
+      clampRect();
       draw();
       loadTemplates();
     </script>
