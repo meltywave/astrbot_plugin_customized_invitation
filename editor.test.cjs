@@ -78,9 +78,13 @@ function createEditor(templateData = { templates: {} }) {
     clientLeft: 0,
     clientTop: 0,
     getContext: () => context2d,
-    getBoundingClientRect: () => ({ left: 0, top: 0 }),
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: canvas.clientWidth, bottom: canvas.clientHeight }),
   });
   Object.assign(canvasWrap, {
+    bounds: { left: -60, top: -160, right: 1020, bottom: 700 },
+    getBoundingClientRect() {
+      return this.bounds;
+    },
     setPointerCapture(id) {
       this.capturedPointer = id;
     },
@@ -204,6 +208,22 @@ test("a box outside the image can be dragged again", () => {
   assert.equal(editor.state().x, -4);
 });
 
+test("dragging stops at all four gray area edges", () => {
+  for (const [dx, dy, expectedX, expectedY] of [
+    [-2000, 0, -60, 240],
+    [2000, 0, 252, 240],
+    [0, -2000, 96, -160],
+    [0, 2000, 96, 644],
+  ]) {
+    const editor = createEditor();
+    editor.pointer("pointerdown", 480, 268);
+    editor.pointer("pointermove", 480 + dx, 268 + dy);
+    editor.pointer("pointerup", 480 + dx, 268 + dy);
+    assert.equal(editor.state().x, expectedX);
+    assert.equal(editor.state().y, expectedY);
+  }
+});
+
 test("corner drag scales box and preview text by one factor", () => {
   const editor = createEditor();
   const before = editor.state();
@@ -237,7 +257,8 @@ test("corner resize extends beyond the image and saves integer layer values", as
   editor.pointer("pointerup", 2000, 2000);
   const resized = editor.state();
   assert.ok(resized.x + resized.w > 960);
-  assert.ok(resized.y + resized.h > 540);
+  assert.ok(resized.x + resized.w <= 1020 + 1e-5);
+  assert.ok(resized.y + resized.h <= 700 + 1e-5);
   assert.equal(editor.element("selectionBox").style.width, `${resized.w / 960 * 100}%`);
   assert.ok(Math.abs(resized.w / before.w - resized.h / before.h) < 1e-8);
   assert.ok(Math.abs(resized.w / before.w - resized.fontSize / before.fontSize) < 1e-8);
@@ -253,7 +274,7 @@ test("corner resize extends beyond the image and saves integer layer values", as
   assert.equal(editor.saved[0].rotation, "0");
 });
 
-test("top-left corner resize can extend past both image edges", () => {
+test("top-left corner resize stops at the gray area's edge", () => {
   const editor = createEditor();
   const before = editor.state();
   editor.pointer("pointerdown", before.x, before.y);
@@ -261,7 +282,8 @@ test("top-left corner resize can extend past both image edges", () => {
   editor.pointer("pointerup", before.x - 200, before.y - 300);
   const after = editor.state();
   assert.ok(after.x < 0);
-  assert.ok(after.y < 0);
+  assert.ok(after.x >= -60 - 1e-5);
+  assert.ok(after.y >= -160 - 1e-5);
   assert.ok(after.w > before.w);
   assert.ok(after.h > before.h);
 });
@@ -448,6 +470,60 @@ test("axis guides appear only during near-horizontal or near-vertical rotation",
   assert.equal(editor.element("alignmentGuide").style.width, "100%");
   editor.pointer("pointerup", centerX, centerY + 50);
   assert.equal(editor.element("alignmentGuide").style.display, "none");
+});
+
+test("rotation shows a signed angle beside the handle and hides it when done", () => {
+  const editor = createEditor();
+  const box = editor.state();
+  const centerX = box.x + box.w / 2;
+  const centerY = box.y + box.h / 2;
+  editor.pointer("pointerdown", centerX, centerY);
+  editor.pointer("pointerup", centerX, centerY);
+  editor.pointer("pointerdown", centerX, box.y + box.h + 28);
+  const label = editor.element("rotationAngle");
+  assert.equal(label.style.display, "block");
+  assert.equal(label.textContent, "0°");
+  const initialLeft = label.style.left;
+  const initialTop = label.style.top;
+  editor.pointer("pointermove", centerX + 50, centerY + 50);
+  assert.ok(Math.abs(editor.state().rotation + 45) < 1e-8);
+  assert.equal(label.textContent, "-45°");
+  assert.notEqual(label.style.left, initialLeft);
+  assert.notEqual(label.style.top, initialTop);
+  editor.pointer("pointercancel", centerX + 50, centerY + 50);
+  assert.equal(label.style.display, "none");
+});
+
+test("rotation does not let the frame exceed the gray area", () => {
+  const editor = createEditor();
+  editor.canvasWrap.bounds = { left: -60, top: 0, right: 1020, bottom: 540 };
+  const box = editor.state();
+  const centerX = box.x + box.w / 2;
+  const centerY = box.y + box.h / 2;
+  editor.pointer("pointerdown", centerX, centerY);
+  editor.pointer("pointerup", centerX, centerY);
+  editor.pointer("pointerdown", centerX, box.y + box.h + 28);
+  editor.pointer("pointermove", centerX - 50, centerY);
+  assert.equal(editor.state().rotation, 0);
+  assert.equal(editor.element("rotationAngle").textContent, "0°");
+  editor.pointer("pointerup", centerX - 50, centerY);
+});
+
+test("rotation shifts a fitting frame fully inside the gray area", () => {
+  const editor = createEditor();
+  editor.canvasWrap.bounds = { left: -60, top: -60, right: 1020, bottom: 750 };
+  const box = editor.state();
+  const centerX = box.x + box.w / 2;
+  const centerY = box.y + box.h / 2;
+  editor.pointer("pointerdown", centerX, centerY);
+  editor.pointer("pointerup", centerX, centerY);
+  editor.pointer("pointerdown", centerX, box.y + box.h + 28);
+  editor.pointer("pointermove", centerX - 50, centerY);
+  const after = editor.state();
+  assert.ok(Math.abs(after.rotation - 90) < 1e-8);
+  assert.ok(Math.abs(after.y + after.h / 2 - after.w / 2 + 60) < 1e-8);
+  assert.equal(editor.element("rotationAngle").textContent, "90°");
+  editor.pointer("pointerup", centerX - 50, centerY);
 });
 
 test("new images start with a snug text box", async () => {

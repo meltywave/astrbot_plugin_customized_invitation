@@ -83,6 +83,7 @@
         min-width: 0;
         min-height: 0;
         padding: clamp(24px, 5vw, 60px);
+        overflow: hidden;
         touch-action: none;
       }
 
@@ -163,6 +164,20 @@
         position: absolute;
         background: #d94b42;
         pointer-events: none;
+      }
+
+      .rotation-angle {
+        display: none;
+        position: absolute;
+        padding: 2px 5px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--text);
+        font-size: 12px;
+        line-height: 18px;
+        white-space: nowrap;
+        pointer-events: none;
+        transform: translateY(-50%);
       }
 
       .side {
@@ -359,6 +374,7 @@
               <span class="selection-handle right"></span>
               <span class="rotation-handle" title="旋转" aria-hidden="true">↻</span>
             </div>
+            <span class="rotation-angle" id="rotationAngle"></span>
           </div>
         </div>
       </section>
@@ -495,6 +511,7 @@
       const editorSurface = document.getElementById("editorSurface");
       const selectionBox = document.getElementById("selectionBox");
       const alignmentGuide = document.getElementById("alignmentGuide");
+      const rotationAngle = document.getElementById("rotationAngle");
       const ctx = canvas.getContext("2d");
       const imageInput = document.getElementById("imageInput");
       const saveBtn = document.getElementById("saveBtn");
@@ -677,6 +694,32 @@
         };
       }
 
+      function boxLimits(candidate, angle = rotation) {
+        const wrap = canvasWrap.getBoundingClientRect();
+        const image = canvas.getBoundingClientRect();
+        const bounds = imageBounds();
+        const unitX = canvas.clientWidth / bounds.width;
+        const unitY = canvas.clientHeight / bounds.height;
+        const radians = (angle * Math.PI) / 180;
+        const extentX = (Math.abs(Math.cos(radians)) * candidate.w +
+          Math.abs(Math.sin(radians)) * candidate.h) / 2;
+        const extentY = (Math.abs(Math.sin(radians)) * candidate.w +
+          Math.abs(Math.cos(radians)) * candidate.h) / 2;
+        const centerX = candidate.x + candidate.w / 2;
+        const centerY = candidate.y + candidate.h / 2;
+        const left = (wrap.left - image.left - canvas.clientLeft) / unitX;
+        const right = (wrap.right - image.left - canvas.clientLeft) / unitX;
+        const top = (wrap.top - image.top - canvas.clientTop) / unitY;
+        const bottom = (wrap.bottom - image.top - canvas.clientTop) / unitY;
+        return {
+          left, right, top, bottom, extentX, extentY,
+          fits: centerX - extentX >= left - 1e-8 &&
+            centerX + extentX <= right + 1e-8 &&
+            centerY - extentY >= top - 1e-8 &&
+            centerY + extentY <= bottom + 1e-8,
+        };
+      }
+
       function localPoint(point) {
         const center = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
         const offset = rotateVector(point.x - center.x, point.y - center.y, -rotation);
@@ -795,6 +838,18 @@
           alignmentGuide.style.top = "0";
           alignmentGuide.style.width = "1px";
           alignmentGuide.style.height = "100%";
+        }
+
+        rotationAngle.style.display = dragMode === "rotate" ? "block" : "none";
+        if (dragMode === "rotate") {
+          const angle = ((Math.round(rotation) + 180) % 360 + 360) % 360 - 180;
+          const handle = rotateVector(
+            0,
+            rect.h * canvas.clientHeight / bounds.height / 2 + 28,
+          );
+          rotationAngle.textContent = `${angle}°`;
+          rotationAngle.style.left = `calc(${((rect.x + rect.w / 2) / bounds.width) * 100}% + ${handle.x + 16}px)`;
+          rotationAngle.style.top = `calc(${((rect.y + rect.h / 2) / bounds.height) * 100}% + ${handle.y}px)`;
         }
       }
 
@@ -1120,11 +1175,33 @@
       }
 
       function resizeFromAnchor(start, anchorX, anchorY, width, height, nextFontSize, heightForWidth) {
-        rect = rectFromAnchor(
-          start, anchorX, anchorY, width,
-          heightForWidth ? heightForWidth(width) : height,
-        );
-        fontSize = nextFontSize;
+        const candidate = (amount) => {
+          const candidateWidth = start.w + (width - start.w) * amount;
+          const candidateHeight = heightForWidth
+            ? heightForWidth(candidateWidth)
+            : start.h + (height - start.h) * amount;
+          return rectFromAnchor(start, anchorX, anchorY, candidateWidth, candidateHeight);
+        };
+        let amount = 1;
+        if (!boxLimits(candidate(1)).fits) {
+          if (boxLimits(candidate(0)).fits) {
+            let low = 0;
+            let high = 1;
+            for (let index = 0; index < 25; index += 1) {
+              const middle = (low + high) / 2;
+              if (boxLimits(candidate(middle)).fits) {
+                low = middle;
+              } else {
+                high = middle;
+              }
+            }
+            amount = low;
+          } else {
+            amount = 0;
+          }
+        }
+        rect = candidate(amount);
+        fontSize = dragStart.fontSize + (nextFontSize - dragStart.fontSize) * amount;
         inputs.fontsize.value = Math.round(fontSize);
       }
 
@@ -1204,8 +1281,17 @@
         const dx = point.x - dragStart.point.x;
         const dy = point.y - dragStart.point.y;
         if (dragMode === "move") {
-          rect.x = dragStart.rect.x + dx;
-          rect.y = dragStart.rect.y + dy;
+          const limits = boxLimits(dragStart.rect);
+          const minX = limits.left + limits.extentX - rect.w / 2;
+          const maxX = limits.right - limits.extentX - rect.w / 2;
+          const minY = limits.top + limits.extentY - rect.h / 2;
+          const maxY = limits.bottom - limits.extentY - rect.h / 2;
+          if (minX <= maxX) {
+            rect.x = Math.min(Math.max(dragStart.rect.x + dx, minX), maxX);
+          }
+          if (minY <= maxY) {
+            rect.y = Math.min(Math.max(dragStart.rect.y + dy, minY), maxY);
+          }
         } else if (dragMode === "rotate") {
           const center = {
             x: dragStart.rect.x + dragStart.rect.w / 2,
@@ -1213,7 +1299,16 @@
           };
           const startAngle = Math.atan2(dragStart.point.y - center.y, dragStart.point.x - center.x);
           const currentAngle = Math.atan2(point.y - center.y, point.x - center.x);
-          rotation = dragStart.rotation + ((currentAngle - startAngle) * 180) / Math.PI;
+          const nextRotation = dragStart.rotation + ((currentAngle - startAngle) * 180) / Math.PI;
+          const limits = boxLimits(rect, nextRotation);
+          if (limits.extentX * 2 <= limits.right - limits.left &&
+              limits.extentY * 2 <= limits.bottom - limits.top) {
+            rotation = nextRotation;
+            rect.x = Math.min(Math.max(rect.x, limits.left + limits.extentX - rect.w / 2),
+              limits.right - limits.extentX - rect.w / 2);
+            rect.y = Math.min(Math.max(rect.y, limits.top + limits.extentY - rect.h / 2),
+              limits.bottom - limits.extentY - rect.h / 2);
+          }
         } else {
           resizeFromHandle(point);
         }
