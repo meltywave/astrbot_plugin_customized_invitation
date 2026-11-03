@@ -13,7 +13,6 @@ assert.ok(script, "editor script must exist");
 
 function createEditor(templateData = { templates: {} }) {
   const elements = new Map();
-  const strokes = [];
   const textDraws = [];
   const context2d = {
     clearRect() {},
@@ -37,9 +36,6 @@ function createEditor(templateData = { templates: {} }) {
         actualBoundingBoxAscent: size * 0.8,
         actualBoundingBoxDescent: size * 0.2,
       };
-    },
-    strokeRect(x, y, w, h) {
-      strokes.push({ x, y, w, h });
     },
     fillText(text, x, y, maxWidth) {
       textDraws.push({ text, font: this.font, maxWidth });
@@ -73,6 +69,7 @@ function createEditor(templateData = { templates: {} }) {
   }
 
   const canvas = element("canvas");
+  const canvasWrap = element("canvasWrap");
   Object.assign(canvas, {
     width: 960,
     height: 540,
@@ -82,6 +79,8 @@ function createEditor(templateData = { templates: {} }) {
     clientTop: 0,
     getContext: () => context2d,
     getBoundingClientRect: () => ({ left: 0, top: 0 }),
+  });
+  Object.assign(canvasWrap, {
     setPointerCapture(id) {
       this.capturedPointer = id;
     },
@@ -95,6 +94,7 @@ function createEditor(templateData = { templates: {} }) {
 
   const document = {
     getElementById: element,
+    querySelector: () => canvasWrap,
     createElement: () => ({ value: "", textContent: "" }),
   };
   const saved = [];
@@ -123,7 +123,7 @@ function createEditor(templateData = { templates: {} }) {
   vm.runInContext(script, environment);
 
   function pointer(type, x, y) {
-    return canvas.dispatch(type, { clientX: x, clientY: y, pointerId: 1 });
+    return canvasWrap.dispatch(type, { clientX: x, clientY: y, pointerId: 1 });
   }
 
   function state() {
@@ -143,7 +143,7 @@ function createEditor(templateData = { templates: {} }) {
     );
   }
 
-  return { canvas, element, evaluate, pointer, saved, setImageDataUrl, state, strokes, textDraws };
+  return { canvas, canvasWrap, element, evaluate, pointer, saved, setImageDataUrl, state, textDraws };
 }
 
 test("outside drag leaves the text box in place", () => {
@@ -153,7 +153,7 @@ test("outside drag leaves the text box in place", () => {
   editor.pointer("pointermove", 500, 400);
   editor.pointer("pointerup", 500, 400);
   assert.deepEqual(editor.state(), before);
-  assert.equal(editor.canvas.capturedPointer, undefined);
+  assert.equal(editor.canvasWrap.capturedPointer, undefined);
 });
 
 test("moving the box preserves its dimensions and font size", () => {
@@ -168,6 +168,40 @@ test("moving the box preserves its dimensions and font size", () => {
   assert.equal(moved.w, before.w);
   assert.equal(moved.h, before.h);
   assert.equal(moved.fontSize, before.fontSize);
+});
+
+test("the box can move beyond each image edge", () => {
+  for (const [dx, dy, edge] of [
+    [-120, 0, "left"],
+    [120, 0, "right"],
+    [0, -240, "top"],
+    [0, 280, "bottom"],
+  ]) {
+    const editor = createEditor();
+    const before = editor.state();
+    const centerX = before.x + before.w / 2;
+    const centerY = before.y + before.h / 2;
+    editor.pointer("pointerdown", centerX, centerY);
+    editor.pointer("pointermove", centerX + dx, centerY + dy);
+    editor.pointer("pointerup", centerX + dx, centerY + dy);
+    const after = editor.state();
+    assert.equal(after.x, before.x + dx, edge);
+    assert.equal(after.y, before.y + dy, edge);
+    assert.equal(editor.element("selectionBox").style.left, `${after.x / 960 * 100}%`);
+    assert.equal(editor.element("selectionBox").style.top, `${after.y / 540 * 100}%`);
+  }
+});
+
+test("a box outside the image can be dragged again", () => {
+  const editor = createEditor();
+  editor.pointer("pointerdown", 480, 268);
+  editor.pointer("pointermove", 360, 268);
+  editor.pointer("pointerup", 360, 268);
+  assert.equal(editor.state().x, -24);
+  editor.pointer("pointerdown", -12, 268);
+  editor.pointer("pointermove", 8, 268);
+  editor.pointer("pointerup", 8, 268);
+  assert.equal(editor.state().x, -4);
 });
 
 test("corner drag scales box and preview text by one factor", () => {
@@ -195,15 +229,16 @@ test("corner drag scales box and preview text by one factor", () => {
   assert.ok(Math.abs(reduced.fontSize / enlarged.fontSize - 0.5) < 1e-10);
 });
 
-test("resize stays within the image and saves integer layer values", async () => {
+test("corner resize extends beyond the image and saves integer layer values", async () => {
   const editor = createEditor();
   const before = editor.state();
   editor.pointer("pointerdown", before.x + before.w, before.y + before.h);
   editor.pointer("pointermove", 2000, 2000);
   editor.pointer("pointerup", 2000, 2000);
   const resized = editor.state();
-  assert.ok(resized.x + resized.w <= 960);
-  assert.ok(resized.y + resized.h <= 540);
+  assert.ok(resized.x + resized.w > 960);
+  assert.ok(resized.y + resized.h > 540);
+  assert.equal(editor.element("selectionBox").style.width, `${resized.w / 960 * 100}%`);
   assert.ok(Math.abs(resized.w / before.w - resized.h / before.h) < 1e-8);
   assert.ok(Math.abs(resized.w / before.w - resized.fontSize / before.fontSize) < 1e-8);
   assert.ok(resized.w > 0 && resized.h > 0);
@@ -216,6 +251,19 @@ test("resize stays within the image and saves integer layer values", async () =>
   assert.equal(editor.saved[0].h, String(Math.round(resized.h)));
   assert.equal(editor.saved[0].fontsize, String(Math.round(resized.fontSize)));
   assert.equal(editor.saved[0].rotation, "0");
+});
+
+test("top-left corner resize can extend past both image edges", () => {
+  const editor = createEditor();
+  const before = editor.state();
+  editor.pointer("pointerdown", before.x, before.y);
+  editor.pointer("pointermove", before.x - 200, before.y - 300);
+  editor.pointer("pointerup", before.x - 200, before.y - 300);
+  const after = editor.state();
+  assert.ok(after.x < 0);
+  assert.ok(after.y < 0);
+  assert.ok(after.w > before.w);
+  assert.ok(after.h > before.h);
 });
 
 test("existing template loads its box and font size for proportional resizing", async () => {
@@ -275,6 +323,21 @@ test("left and right handles change only width", () => {
     assert.ok(Math.abs(after.h - before.h) < 1e-8);
     assert.equal(after.fontSize, before.fontSize);
     assert.ok(Math.abs(after.x - (before.x + (side === "left" ? 30 : 0))) < 1e-8);
+  }
+});
+
+test("side handles can resize past the left and right image edges", () => {
+  for (const side of ["left", "right"]) {
+    const editor = createEditor();
+    const before = editor.state();
+    const x = side === "left" ? before.x : before.x + before.w;
+    const y = before.y + before.h / 2;
+    const target = side === "left" ? -20 : 1000;
+    editor.pointer("pointerdown", x, y);
+    editor.pointer("pointermove", target, y);
+    editor.pointer("pointerup", target, y);
+    const after = editor.state();
+    assert.ok(side === "left" ? after.x < 0 : after.x + after.w > 960);
   }
 });
 
@@ -367,6 +430,26 @@ test("rotation handle supports clockwise and counterclockwise drags", async () =
   assert.ok(Math.abs(editor.state().rotation) < 1e-8);
 });
 
+test("axis guides appear only during near-horizontal or near-vertical rotation", () => {
+  const editor = createEditor();
+  const box = editor.state();
+  const centerX = box.x + box.w / 2;
+  const centerY = box.y + box.h / 2;
+  editor.pointer("pointerdown", centerX, centerY);
+  editor.pointer("pointerup", centerX, centerY);
+  editor.pointer("pointerdown", centerX, box.y + box.h + 28);
+  editor.pointer("pointermove", centerX - 50, centerY);
+  assert.equal(editor.element("alignmentGuide").style.display, "block");
+  assert.equal(editor.element("alignmentGuide").style.height, "100%");
+  editor.pointer("pointermove", centerX + 50, centerY - 50);
+  assert.equal(editor.element("alignmentGuide").style.display, "none");
+  editor.pointer("pointermove", centerX, centerY + 50);
+  assert.equal(editor.element("alignmentGuide").style.display, "block");
+  assert.equal(editor.element("alignmentGuide").style.width, "100%");
+  editor.pointer("pointerup", centerX, centerY + 50);
+  assert.equal(editor.element("alignmentGuide").style.display, "none");
+});
+
 test("new images start with a snug text box", async () => {
   const editor = createEditor();
   editor.element("imageInput").files = [{}];
@@ -406,7 +489,7 @@ test("corner cursors reflect diagonal and rotated resize directions", () => {
     [box.x, box.y + box.h, "nesw-resize"],
   ]) {
     editor.pointer("pointermove", x, y);
-    assert.equal(editor.canvas.style.cursor, expected);
+    assert.equal(editor.canvasWrap.style.cursor, expected);
   }
 
   editor.evaluate("rotation = 45");
@@ -420,7 +503,7 @@ test("corner cursors reflect diagonal and rotated resize directions", () => {
     const centerY = box.y + box.h / 2;
     const point = editor.evaluate(`rotateVector(${localX - centerX}, ${localY - centerY})`);
     editor.pointer("pointermove", centerX + point.x, centerY + point.y);
-    assert.equal(editor.canvas.style.cursor, expected);
+    assert.equal(editor.canvasWrap.style.cursor, expected);
   }
 });
 
@@ -437,6 +520,23 @@ test("saved rotation is restored when an existing template loads", async () => {
   });
   await new Promise(setImmediate);
   assert.equal(editor.state().rotation, -35);
+});
+
+test("existing templates retain positions outside the image", async () => {
+  const editor = createEditor({
+    templates: {
+      saved: {
+        background: "data:image/png;base64,AA==",
+        layer: { x: -80, y: -80, w: 300, h: 80, fontsize: 40 },
+      },
+    },
+    user_templates: ["saved"],
+    current: "saved",
+  });
+  await new Promise(setImmediate);
+  assert.equal(editor.state().x, -80);
+  assert.ok(editor.state().y < 0);
+  assert.match(editor.element("selectionBox").style.left, /^-/);
 });
 
 test("position and size fields are absent from the sidebar", () => {
