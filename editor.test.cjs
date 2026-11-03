@@ -45,11 +45,28 @@ function createEditor(templateData = { templates: {} }) {
   function element(id) {
     if (!elements.has(id)) {
       const listeners = new Map();
+      const classes = new Set();
+      const attributes = new Map();
       elements.set(id, {
         id,
         value: id === "fontSizeInput" ? "48" : "",
         style: {},
-        classList: { toggle() {} },
+        offsetHeight: id === "selectionToolbar" ? 100 : 0,
+        classList: {
+          toggle(name, enabled) {
+            if (enabled) classes.add(name);
+            else classes.delete(name);
+          },
+          contains(name) {
+            return classes.has(name);
+          },
+        },
+        setAttribute(name, value) {
+          attributes.set(name, value);
+        },
+        getAttribute(name) {
+          return attributes.get(name);
+        },
         children: [],
         addEventListener(type, callback) {
           listeners.set(type, callback);
@@ -158,6 +175,54 @@ test("outside drag leaves the text box in place", () => {
   editor.pointer("pointerup", 500, 400);
   assert.deepEqual(editor.state(), before);
   assert.equal(editor.canvasWrap.capturedPointer, undefined);
+});
+
+test("toolbar is below the title and appears only while the frame is selected", () => {
+  assert.match(html, /<header class="topbar">[\s\S]*?<\/header>\s*<div class="selection-toolbar"[\s\S]*?<div class="canvas-wrap">/);
+  assert.doesNotMatch(html, /<aside class="side">/);
+  const editor = createEditor();
+  const toolbar = editor.element("selectionToolbar");
+  assert.equal(toolbar.classList.contains("visible"), false);
+  assert.equal(toolbar.getAttribute("aria-hidden"), "true");
+  assert.equal(toolbar.inert, true);
+  editor.pointer("pointerdown", 480, 268);
+  editor.pointer("pointerup", 480, 268);
+  assert.equal(toolbar.classList.contains("visible"), true);
+  assert.equal(toolbar.getAttribute("aria-hidden"), "false");
+  assert.equal(toolbar.inert, false);
+  editor.pointer("pointerdown", 20, 20);
+  assert.equal(toolbar.classList.contains("visible"), false);
+  assert.equal(toolbar.inert, true);
+});
+
+test("uploading an image keeps the selected toolbar open", async () => {
+  const editor = createEditor();
+  editor.pointer("pointerdown", 480, 268);
+  editor.pointer("pointerup", 480, 268);
+  editor.element("imageInput").files = [{}];
+  await editor.element("imageInput").dispatch("change");
+  assert.equal(editor.state().selected, true);
+  assert.equal(editor.element("selectionToolbar").classList.contains("visible"), true);
+});
+
+test("switching templates keeps the selected toolbar open", async () => {
+  const editor = createEditor({
+    templates: {
+      saved: {
+        background: "data:image/png;base64,AA==",
+        layer: { x: 100, y: 100, w: 300, h: 80, fontsize: 40 },
+      },
+    },
+    user_templates: ["saved"],
+  });
+  await new Promise(setImmediate);
+  editor.pointer("pointerdown", 480, 268);
+  editor.pointer("pointerup", 480, 268);
+  editor.evaluate('setTemplateMode("existing")');
+  editor.element("templateSelect").value = "saved";
+  await editor.element("templateSelect").dispatch("change");
+  assert.equal(editor.state().selected, true);
+  assert.equal(editor.element("selectionToolbar").classList.contains("visible"), true);
 });
 
 test("moving the box preserves its dimensions and font size", () => {
@@ -615,6 +680,6 @@ test("existing templates retain positions outside the image", async () => {
   assert.match(editor.element("selectionBox").style.left, /^-/);
 });
 
-test("position and size fields are absent from the sidebar", () => {
-  assert.doesNotMatch(html, /位置与尺寸|id="[xywh]Input"/);
+test("position and size fields are absent from the toolbar", () => {
+  assert.doesNotMatch(html, /id="[xywh]Input"/);
 });

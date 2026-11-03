@@ -36,21 +36,18 @@
       }
 
       .shell {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) 360px;
         min-height: 100vh;
       }
 
       .stage {
         display: grid;
-        grid-template-rows: auto minmax(0, 1fr);
+        grid-template-rows: auto auto minmax(0, 1fr);
         min-width: 0;
+        min-height: 100vh;
       }
 
-      .topbar,
-      .side {
+      .topbar {
         background: var(--panel);
-        border-color: var(--line);
       }
 
       .topbar {
@@ -81,7 +78,7 @@
         display: grid;
         place-items: center;
         min-width: 0;
-        min-height: 0;
+        min-height: 300px;
         padding: clamp(24px, 5vw, 60px);
         overflow: hidden;
         touch-action: none;
@@ -180,24 +177,45 @@
         transform: translateY(-50%);
       }
 
-      .side {
+      .selection-toolbar {
         display: flex;
-        flex-direction: column;
-        gap: 16px;
-        padding: 18px;
-        border-left: 1px solid var(--line);
+        align-items: flex-end;
+        flex-wrap: wrap;
+        gap: 10px 18px;
+        margin: 12px 18px 0;
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        max-height: 180px;
         overflow: auto;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .selection-toolbar.visible {
+        visibility: visible;
+        pointer-events: auto;
+      }
+
+      .selection-toolbar [hidden] {
+        display: none;
       }
 
       .group {
-        display: grid;
-        gap: 10px;
+        display: flex;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        gap: 8px;
+        min-width: 0;
       }
 
       .group-title {
-        margin: 0;
-        font-size: 14px;
+        align-self: center;
+        margin: 0 4px 0 0;
+        font-size: 12px;
         font-weight: 650;
+        color: var(--muted);
       }
 
       label {
@@ -229,38 +247,66 @@
       }
 
       .grid2 {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
-      }
-
-      .icon-control-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
-      }
-
-      .mode-switch {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
+        display: flex;
+        align-items: flex-end;
         gap: 8px;
       }
 
-      .mode-button {
+      .icon-control-grid {
+        display: flex;
+        gap: 8px;
+      }
+
+      .mode-switch {
+        display: flex;
+        overflow: hidden;
         border: 1px solid var(--line);
+        border-radius: 6px;
+      }
+
+      .mode-button {
+        border: 0;
+        border-radius: 0;
         background: #ffffff;
         color: var(--muted);
+        padding: 0 10px;
+      }
+
+      .mode-button + .mode-button {
+        border-left: 1px solid var(--line);
       }
 
       .mode-button.active {
-        border-color: var(--accent);
         background: var(--soft);
         color: var(--accent);
+      }
+
+      .template-picker,
+      .template-name-field,
+      .font-field {
+        width: 150px;
+      }
+
+      .image-field {
+        width: 180px;
+      }
+
+      .font-size-field {
+        width: 72px;
+      }
+
+      .color-field {
+        width: 56px;
+      }
+
+      .selection-toolbar input[type="file"] {
+        min-width: 0;
       }
 
       .icon-control {
         display: grid;
         gap: 6px;
+        width: 116px;
       }
 
       .icon-control-title {
@@ -325,10 +371,14 @@
       }
 
       .status {
-        min-height: 20px;
+        flex-basis: 100%;
         color: var(--muted);
         font-size: 13px;
         line-height: 1.45;
+      }
+
+      .status:empty {
+        display: none;
       }
 
       .status.error {
@@ -339,14 +389,15 @@
         color: var(--ok);
       }
 
-      @media (max-width: 900px) {
-        .shell {
-          grid-template-columns: 1fr;
+      @media (max-width: 600px) {
+        .selection-toolbar {
+          margin: 10px 12px 0;
+          padding: 10px;
+          gap: 10px;
         }
 
-        .side {
-          border-left: 0;
-          border-top: 1px solid var(--line);
+        .group {
+          width: 100%;
         }
       }
     </style>
@@ -361,38 +412,20 @@
           </div>
           <button id="saveBtn" type="button" disabled>保存</button>
         </header>
-        <div class="canvas-wrap">
-          <div class="editor-surface" id="editorSurface">
-            <canvas id="canvas" width="960" height="540"></canvas>
-            <div class="alignment-guide" id="alignmentGuide"></div>
-            <div class="selection-box" id="selectionBox">
-              <span class="selection-handle nw"></span>
-              <span class="selection-handle ne"></span>
-              <span class="selection-handle se"></span>
-              <span class="selection-handle sw"></span>
-              <span class="selection-handle left"></span>
-              <span class="selection-handle right"></span>
-              <span class="rotation-handle" title="旋转" aria-hidden="true">↻</span>
-            </div>
-            <span class="rotation-angle" id="rotationAngle"></span>
-          </div>
-        </div>
-      </section>
-
-      <aside class="side">
+        <div class="selection-toolbar" id="selectionToolbar" role="toolbar" aria-label="选中文本框工具栏" aria-hidden="true">
         <section class="group">
           <p class="group-title">模版</p>
           <div class="mode-switch" role="tablist" aria-label="模版操作">
             <button id="newTemplateBtn" class="mode-button active" type="button">新增模版</button>
             <button id="existingTemplateBtn" class="mode-button" type="button">选择已有</button>
           </div>
-          <label id="templateSelectLabel" hidden>
+          <label id="templateSelectLabel" class="template-picker" hidden>
             已上传模版
             <select id="templateSelect">
               <option value="">请选择模版</option>
             </select>
           </label>
-          <label>
+          <label class="template-name-field">
             模版名称
             <input id="templateNameInput" type="text" maxlength="64" />
           </label>
@@ -400,7 +433,7 @@
 
         <section class="group">
           <p class="group-title">图片</p>
-          <label>
+          <label class="image-field">
             模版图片
             <input id="imageInput" type="file" accept="image/*" />
           </label>
@@ -409,16 +442,16 @@
         <section class="group">
           <p class="group-title">文字样式</p>
           <div class="grid2">
-            <label>
+            <label class="font-size-field">
               字号
               <input id="fontSizeInput" type="number" min="8" step="1" value="48" />
             </label>
-            <label>
+            <label class="color-field">
               颜色
               <input id="colorInput" type="color" value="#000000" />
             </label>
           </div>
-          <label>
+          <label class="font-field">
             字体
             <select id="fontInput"></select>
           </label>
@@ -486,7 +519,24 @@
         </section>
 
         <div id="status" class="status"></div>
-      </aside>
+        </div>
+        <div class="canvas-wrap">
+          <div class="editor-surface" id="editorSurface">
+            <canvas id="canvas" width="960" height="540"></canvas>
+            <div class="alignment-guide" id="alignmentGuide"></div>
+            <div class="selection-box" id="selectionBox">
+              <span class="selection-handle nw"></span>
+              <span class="selection-handle ne"></span>
+              <span class="selection-handle se"></span>
+              <span class="selection-handle sw"></span>
+              <span class="selection-handle left"></span>
+              <span class="selection-handle right"></span>
+              <span class="rotation-handle" title="旋转" aria-hidden="true">↻</span>
+            </div>
+            <span class="rotation-angle" id="rotationAngle"></span>
+          </div>
+        </div>
+      </section>
     </main>
 
     <script>
@@ -508,6 +558,7 @@
 
       const canvas = document.getElementById("canvas");
       const canvasWrap = document.querySelector(".canvas-wrap");
+      const selectionToolbar = document.getElementById("selectionToolbar");
       const editorSurface = document.getElementById("editorSurface");
       const selectionBox = document.getElementById("selectionBox");
       const alignmentGuide = document.getElementById("alignmentGuide");
@@ -751,11 +802,9 @@
       }
 
       function fitCanvas(width, height) {
-        const maxWidth = Math.max(
-          320,
-          window.innerWidth - (window.innerWidth > 900 ? 420 : 36),
-        );
-        const maxHeight = Math.max(260, window.innerHeight - 104);
+        const padding = Math.min(60, Math.max(24, window.innerWidth * 0.05));
+        const maxWidth = Math.max(1, window.innerWidth - padding * 2);
+        const maxHeight = Math.max(1, window.innerHeight - 104 - selectionToolbar.offsetHeight - padding * 2);
         scale = Math.min(maxWidth / width, maxHeight / height, 1);
         canvas.width = Math.round(width * scale);
         canvas.height = Math.round(height * scale);
@@ -796,6 +845,9 @@
       }
 
       function draw() {
+        selectionToolbar.classList.toggle("visible", selected);
+        selectionToolbar.setAttribute("aria-hidden", String(!selected));
+        selectionToolbar.inert = !selected;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         if (bitmap) {
           ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
@@ -905,7 +957,6 @@
         };
         fontSize = Math.max(8, Number(layer.fontsize) || 48);
         rotation = Number(layer.rotation) || 0;
-        selected = false;
         inputs.fontsize.value = Math.round(fontSize);
         inputs.color.value = layer.color || "#000000";
         selectFont(layer.font || "");
@@ -1132,7 +1183,6 @@
           h: textSize(fontSize, boxWidth).h,
         };
         rotation = 0;
-        selected = false;
         inputs.fontsize.value = fontSize;
         draw();
         updateSaveState();
