@@ -119,10 +119,17 @@ function createEditor(templateData = { templates: {} }) {
     createElement: () => ({ value: "", textContent: "" }),
   };
   const saved = [];
+  const windowListeners = new Map();
   const window = {
     location: { search: "", hash: "" },
     innerWidth: 1400,
     innerHeight: 800,
+    addEventListener(type, callback) {
+      windowListeners.set(type, callback);
+    },
+    dispatch(type, event) {
+      return windowListeners.get(type)?.(event);
+    },
     AstrBotPluginPage: {
       ready: async () => {},
       apiGet: async () => templateData,
@@ -147,6 +154,20 @@ function createEditor(templateData = { templates: {} }) {
     return canvasWrap.dispatch(type, { clientX: x, clientY: y, pointerId: 1 });
   }
 
+  function keydown(key, target = null, modifiers = {}) {
+    const event = {
+      key,
+      target,
+      ...modifiers,
+      defaultPrevented: false,
+      preventDefault() {
+        this.defaultPrevented = true;
+      },
+    };
+    window.dispatch("keydown", event);
+    return event;
+  }
+
   function state() {
     const value = vm.runInContext("({ ...rect, fontSize, rotation, selected })", environment);
     return { ...value };
@@ -164,7 +185,7 @@ function createEditor(templateData = { templates: {} }) {
     );
   }
 
-  return { canvas, canvasWrap, element, evaluate, pointer, saved, setImageDataUrl, state, textDraws };
+  return { canvas, canvasWrap, element, evaluate, keydown, pointer, saved, setImageDataUrl, state, textDraws };
 }
 
 test("outside drag leaves the text box in place", () => {
@@ -287,6 +308,76 @@ test("dragging stops at all four gray area edges", () => {
     assert.equal(editor.state().x, expectedX);
     assert.equal(editor.state().y, expectedY);
   }
+});
+
+test("arrow keys and WASD move the selected box by one unit", () => {
+  const editor = createEditor();
+  editor.pointer("pointerdown", 480, 268);
+  editor.pointer("pointerup", 480, 268);
+  const before = editor.state();
+  for (const [key, dx, dy] of [
+    ["ArrowLeft", -1, 0], ["a", -1, 0],
+    ["ArrowRight", 1, 0], ["D", 1, 0],
+    ["ArrowUp", 0, -1], ["w", 0, -1],
+    ["ArrowDown", 0, 1], ["S", 0, 1],
+  ]) {
+    const previous = editor.state();
+    const event = editor.keydown(key);
+    assert.equal(event.defaultPrevented, true, key);
+    assert.equal(editor.state().x, previous.x + dx, key);
+    assert.equal(editor.state().y, previous.y + dy, key);
+  }
+  assert.equal(editor.state().x, before.x);
+  assert.equal(editor.state().y, before.y);
+});
+
+test("keyboard movement does not interfere with typing or an unselected box", () => {
+  const editor = createEditor();
+  const before = editor.state();
+  assert.equal(editor.keydown("ArrowLeft").defaultPrevented, false);
+  assert.equal(editor.state().x, before.x);
+
+  editor.pointer("pointerdown", 480, 268);
+  editor.pointer("pointerup", 480, 268);
+  for (const key of ["a", "ArrowLeft"]) {
+    const event = editor.keydown(key, { closest: () => ({}) });
+    assert.equal(event.defaultPrevented, false);
+    assert.equal(editor.state().x, before.x);
+  }
+  assert.equal(editor.keydown("a", null, { ctrlKey: true }).defaultPrevented, false);
+  assert.equal(editor.keydown("d", null, { metaKey: true }).defaultPrevented, false);
+  assert.equal(editor.state().x, before.x);
+});
+
+test("keyboard movement stops at the gray area boundary", () => {
+  const editor = createEditor();
+  editor.pointer("pointerdown", 480, 268);
+  editor.pointer("pointerup", 480, 268);
+  for (const [key, x, y, expectedX, expectedY] of [
+    ["ArrowLeft", -2000, 268, -60, 240],
+    ["d", 2000, 268, 252, 240],
+    ["w", 480, -2000, 96, -160],
+    ["ArrowDown", 480, 2000, 96, 644],
+  ]) {
+    editor.evaluate("rect = { x: 96, y: 240, w: 768, h: 56 }; draw()");
+    editor.pointer("pointerdown", 480, 268);
+    editor.pointer("pointermove", x, y);
+    editor.pointer("pointerup", x, y);
+    assert.equal(editor.state().x, expectedX);
+    assert.equal(editor.state().y, expectedY);
+    editor.keydown(key);
+    assert.equal(editor.state().x, expectedX);
+    assert.equal(editor.state().y, expectedY);
+  }
+});
+
+test("keyboard movement respects the rotated box boundary", () => {
+  const editor = createEditor();
+  editor.evaluate("rect = { x: 300, y: 472, w: 400, h: 56 }; rotation = 90; selected = true; draw()");
+  assert.equal(editor.keydown("ArrowDown").defaultPrevented, true);
+  assert.equal(editor.state().y, 472);
+  editor.keydown("w");
+  assert.equal(editor.state().y, 471);
 });
 
 test("corner drag scales box and preview text by one factor", () => {

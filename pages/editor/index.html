@@ -1377,6 +1377,35 @@
       canvasWrap.addEventListener("pointerup", endDrag);
       canvasWrap.addEventListener("pointercancel", endDrag);
 
+      window.addEventListener("keydown", (event) => {
+        if (!selected || dragMode || event.altKey || event.ctrlKey || event.metaKey ||
+            event.target?.closest("input, textarea, select, button, [contenteditable]")) {
+          return;
+        }
+        const key = event.key.toLowerCase();
+        let dx = 0;
+        let dy = 0;
+        if (key === "arrowleft" || key === "a") dx = -1;
+        else if (key === "arrowright" || key === "d") dx = 1;
+        else if (key === "arrowup" || key === "w") dy = -1;
+        else if (key === "arrowdown" || key === "s") dy = 1;
+        else return;
+
+        event.preventDefault();
+        const limits = boxLimits(rect);
+        const minX = limits.left + limits.extentX - rect.w / 2;
+        const maxX = limits.right - limits.extentX - rect.w / 2;
+        const minY = limits.top + limits.extentY - rect.h / 2;
+        const maxY = limits.bottom - limits.extentY - rect.h / 2;
+        if (dx && minX <= maxX) {
+          rect.x = Math.min(Math.max(rect.x + dx, minX), maxX);
+        }
+        if (dy && minY <= maxY) {
+          rect.y = Math.min(Math.max(rect.y + dy, minY), maxY);
+        }
+        draw();
+      });
+
       saveBtn.addEventListener("click", async () => {
         if (!currentTemplateName()) {
           setStatus("Please enter a template name.", "error");
