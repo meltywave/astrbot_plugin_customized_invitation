@@ -14,6 +14,7 @@ assert.ok(script, "editor script must exist");
 function createEditor(templateData = { templates: {} }) {
   const elements = new Map();
   const textDraws = [];
+  const lineDraws = [];
   const context2d = {
     clearRect() {},
     drawImage() {},
@@ -23,14 +24,22 @@ function createEditor(templateData = { templates: {} }) {
     restore() {},
     translate() {},
     rotate() {},
-    beginPath() {},
+    beginPath() {
+      this.path = [];
+    },
     arc() {},
-    moveTo() {},
-    lineTo() {},
+    moveTo(x, y) {
+      this.path.push([x, y]);
+    },
+    lineTo(x, y) {
+      this.path.push([x, y]);
+    },
     fill() {},
-    stroke() {},
+    stroke() {
+      lineDraws.push(this.path);
+    },
     measureText(text) {
-      const size = parseFloat(this.font);
+      const size = Number(this.font.match(/[\d.]+(?=px)/)?.[0]);
       return {
         width: size * Array.from(text).length * 0.6,
         actualBoundingBoxAscent: size * 0.8,
@@ -189,7 +198,7 @@ function createEditor(templateData = { templates: {} }) {
     );
   }
 
-  return { canvas, canvasWrap, element, evaluate, keydown, pointer, saved, setImageDataUrl, state, textDraws };
+  return { canvas, canvasWrap, element, evaluate, keydown, lineDraws, pointer, saved, setImageDataUrl, state, textDraws };
 }
 
 test("outside drag leaves the text box in place", () => {
@@ -207,7 +216,7 @@ test("toolbar is below the title and appears only while the frame is selected", 
   assert.match(html, /<div class="editor-header">\s*<header class="topbar">/);
   assert.match(html, /\.editor-header\s*\{[^}]*position: sticky;[^}]*top: 0;/);
   assert.match(html, /\.topbar\s*\{[^}]*flex-wrap: nowrap;[^}]*height: 88px;[^}]*overflow-x: auto;/);
-  assert.match(html, /\.selection-toolbar\s*\{[^}]*flex-wrap: nowrap;[^}]*height: 88px;[^}]*overflow-x: auto;/);
+  assert.match(html, /\.selection-toolbar\s*\{[^}]*flex-wrap: nowrap;[^}]*width: max-content;[^}]*margin: 12px auto 0;[^}]*height: 54px;[^}]*overflow-x: auto;/);
   assert.match(html, /<h1 id="templateName"><\/h1>/);
   assert.doesNotMatch(html, /邀请函模版编辑器/);
   const toolbarMarkup = html.match(/<div class="selection-toolbar"[\s\S]*?<div class="canvas-wrap">/)?.[0];
@@ -249,6 +258,84 @@ test("prefill text replaces the canvas preview as it is typed", () => {
   preview.value = "";
   preview.dispatch("input");
   assert.equal(editor.textDraws.at(-1).text, "");
+});
+
+test("formatting toolbar uses one row of functional groups", () => {
+  const toolbar = html.match(/<div class="selection-toolbar"[\s\S]*?<div class="canvas-wrap">/)?.[0];
+  assert.match(html, /\.selection-toolbar\s*\{[^}]*flex-wrap: nowrap;/);
+  assert.match(html, /@media \(max-width: 900px\)\s*\{\s*\.selection-toolbar\s*\{\s*height: 70px;/);
+  assert.match(html, /\.format-group\s*\{[^}]*border-right: 1px solid var\(--line\);/);
+  assert.doesNotMatch(toolbar, /<p class="group-title">|<label(?:\s|>)/);
+  assert.match(toolbar, /id="alignmentModeLabel" hidden/);
+  for (const group of ["文本内容", "字体设置", "字形设置", "排版与对齐"]) {
+    assert.match(toolbar, new RegExp(`aria-label="${group}"`));
+  }
+  for (const [id, label] of [
+    ["previewTextInput", "文本预填"], ["fontInput", "字体"],
+    ["fontSizeInput", "字号"], ["colorInput", "颜色"],
+  ]) {
+    assert.match(toolbar, new RegExp(`id="${id}"[^>]*title="${label}"[^>]*aria-label="${label}"`));
+  }
+  for (const id of ["boldBtn", "italicBtn", "underlineBtn", "strikethroughBtn", "alignControl"]) {
+    assert.match(toolbar, new RegExp(`id="${id}"`));
+  }
+});
+
+test("text style buttons update preview and save all formatting values", async () => {
+  const editor = createEditor();
+  editor.pointer("pointerdown", 480, 268);
+  editor.pointer("pointerup", 480, 268);
+  editor.element("fontInput").value = "simhei";
+  editor.element("fontInput").dispatch("change");
+  editor.element("fontSizeInput").value = "36";
+  editor.element("fontSizeInput").dispatch("input");
+  for (const style of ["bold", "italic", "underline", "strikethrough"]) {
+    const button = editor.element(`${style}Btn`);
+    button.dispatch("click");
+    assert.equal(button.classList.contains("active"), true);
+    assert.equal(button.getAttribute("aria-pressed"), "true");
+  }
+  const preview = editor.element("previewTextInput");
+  preview.value = "Sample";
+  preview.dispatch("input");
+  assert.equal(editor.textDraws.at(-1).text, "Sample");
+  assert.match(editor.textDraws.at(-1).font, /^italic bold /);
+  assert.ok(editor.lineDraws.at(-1).length >= 4);
+  editor.element("templateNameInput").value = "styled";
+  editor.setImageDataUrl("data:image/png;base64,AA==");
+  await editor.element("saveBtn").dispatch("click");
+  assert.equal(editor.saved.length, 1);
+  for (const style of ["bold", "italic", "underline", "strikethrough"]) {
+    assert.equal(editor.saved[0][style], true);
+  }
+  assert.equal(editor.saved[0].default, "Sample");
+  assert.equal(editor.saved[0].font, "simhei");
+  assert.equal(editor.saved[0].fontsize, "36");
+
+  editor.element("strikethroughBtn").dispatch("click");
+  assert.equal(editor.element("strikethroughBtn").getAttribute("aria-pressed"), "false");
+});
+
+test("saved formatting and prefill are restored in the editor", async () => {
+  const editor = createEditor({
+    templates: {
+      styled: {
+        background: "data:image/png;base64,AA==",
+        layer: {
+          x: 100, y: 100, w: 300, h: 80, fontsize: 40, default: "Guest",
+          bold: true, italic: true, underline: true, strikethrough: true,
+        },
+      },
+    },
+    user_templates: ["styled"],
+    current: "styled",
+  });
+  await new Promise(setImmediate);
+  assert.equal(editor.element("previewTextInput").value, "Guest");
+  for (const style of ["bold", "italic", "underline", "strikethrough"]) {
+    assert.equal(editor.element(`${style}Btn`).getAttribute("aria-pressed"), "true");
+  }
+  assert.equal(editor.textDraws.at(-1).text, "Guest");
 });
 
 test("orientation button switches the shared alignment control and vertical preview", async () => {

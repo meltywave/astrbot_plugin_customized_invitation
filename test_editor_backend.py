@@ -125,6 +125,62 @@ class EditorBackendTests(unittest.TestCase):
         self.assertIsNotNone(bottom_bounds)
         self.assertGreater(bottom_bounds[1], top_bounds[1])
 
+    def test_text_styles_and_prefill_round_trip_and_render(self) -> None:
+        source = self.root / "source.png"
+        Image.new("RGB", (300, 180), "white").save(source)
+        options = {
+            "x": "40",
+            "y": "40",
+            "w": "220",
+            "h": "90",
+            "fontsize": "40",
+            "color": "#000000",
+            "default": "TEST",
+        }
+        renderer = TemplateRenderer(self.root / "fonts")
+        plain = self.manager.create_from_image("plain", source, options)
+        self.assertFalse(plain.layers[0].bold)
+        self.assertFalse(plain.layers[0].italic)
+        self.assertFalse(plain.layers[0].underline)
+        self.assertFalse(plain.layers[0].strikethrough)
+        plain_image = renderer.render(plain, {})
+        plain_pixels = sum(plain_image.convert("L").histogram()[:128])
+
+        for style in ("bold", "italic", "underline", "strikethrough"):
+            styled = self.manager.create_from_image(
+                style, source, {**options, style: "true"}
+            )
+            self.assertTrue(getattr(self.manager.load(style).layers[0], style))
+            self.assertEqual(styled.layers[0].default, "TEST")
+            image = renderer.render(styled, {})
+            self.assertNotEqual(image.tobytes(), plain_image.tobytes(), style)
+            if style in {"bold", "underline", "strikethrough"}:
+                pixels = sum(image.convert("L").histogram()[:128])
+                self.assertGreater(pixels, plain_pixels, style)
+
+        combined = self.manager.create_from_image(
+            "combined",
+            source,
+            {
+                **options,
+                "orientation": "vertical",
+                "w": "90",
+                "h": "130",
+                "bold": "true",
+                "italic": "true",
+                "underline": "true",
+                "strikethrough": "true",
+                "rotation": "35",
+            },
+        )
+        self.assertIsNotNone(renderer.render(combined, {}).getbbox())
+
+    def test_invalid_text_style_is_rejected(self) -> None:
+        source = self.root / "source.png"
+        Image.new("RGB", (100, 100), "white").save(source)
+        with self.assertRaisesRegex(TemplateConfigError, "bold must be true or false"):
+            self.manager.create_from_image("invalid", source, {"bold": "sometimes"})
+
     def test_rotation_round_trip_and_rendering(self) -> None:
         source = self.root / "source.png"
         Image.new("RGB", (240, 160), "white").save(source)

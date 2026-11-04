@@ -19,6 +19,10 @@ class TextLayer:
         align: Horizontal alignment, left, center, or right.
         valign: Vertical alignment, top, middle, or bottom.
         orientation: Text flow, horizontal or vertical.
+        bold: Whether to render bold text.
+        italic: Whether to render italic text.
+        underline: Whether to underline text.
+        strikethrough: Whether to strike through text.
         color: Text color in hex format.
         rotation: Clockwise rotation in degrees around the box center.
         required: Whether this field must be provided by the user.
@@ -36,6 +40,10 @@ class TextLayer:
     align: str = "left"
     valign: str = "top"
     orientation: str = "horizontal"
+    bold: bool = False
+    italic: bool = False
+    underline: bool = False
+    strikethrough: bool = False
     color: str = "#000000"
     rotation: int = 0
     required: bool = True

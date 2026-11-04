@@ -221,6 +221,11 @@ class CustomizedInvitationPlugin(Star):
                         "align": layer.align if layer else "center",
                         "valign": layer.valign if layer else "middle",
                         "orientation": layer.orientation if layer else "horizontal",
+                        "bold": layer.bold if layer else False,
+                        "italic": layer.italic if layer else False,
+                        "underline": layer.underline if layer else False,
+                        "strikethrough": layer.strikethrough if layer else False,
+                        "default": layer.default if layer else "",
                     },
                 }
             except (OSError, TemplateConfigError) as err:
@@ -294,6 +299,10 @@ class CustomizedInvitationPlugin(Star):
             "align",
             "valign",
             "orientation",
+            "bold",
+            "italic",
+            "underline",
+            "strikethrough",
             "color",
             "font",
             "default",

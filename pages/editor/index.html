@@ -236,15 +236,16 @@
 
       .selection-toolbar {
         display: flex;
-        align-items: flex-end;
+        align-items: center;
         flex-wrap: nowrap;
-        gap: 10px 18px;
-        margin: 12px 18px 0;
-        padding: 8px 14px;
+        width: max-content;
+        max-width: calc(100% - 36px);
+        margin: 12px auto 0;
+        padding: 8px 10px;
         border: 1px solid var(--line);
         border-radius: 8px;
         background: var(--panel);
-        height: 88px;
+        height: 54px;
         overflow-x: auto;
         overflow-y: hidden;
         visibility: hidden;
@@ -259,6 +260,51 @@
       .selection-toolbar [hidden] {
         display: none;
       }
+
+      .format-group {
+        padding: 0 10px;
+        border-right: 1px solid var(--line);
+      }
+
+      .format-group:first-child {
+        padding-left: 0;
+      }
+
+      .format-group:last-child {
+        padding-right: 0;
+        border-right: 0;
+      }
+
+      .format-toggle-group {
+        display: flex;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+      }
+
+      .format-toggle {
+        width: 36px;
+        min-height: 36px;
+        padding: 0;
+        border-radius: 0;
+        background: var(--panel);
+        color: var(--text);
+        font-weight: 500;
+      }
+
+      .format-toggle + .format-toggle {
+        border-left: 1px solid var(--line);
+      }
+
+      .format-toggle.active {
+        background: var(--soft);
+        color: var(--accent);
+      }
+
+      #boldBtn { font-weight: 700; }
+      #italicBtn { font-style: italic; }
+      #underlineBtn { text-decoration: underline; }
+      #strikethroughBtn { text-decoration: line-through; }
 
       .group {
         display: flex;
@@ -357,16 +403,20 @@
         width: 150px;
       }
 
+      .selection-toolbar .font-field {
+        width: 130px;
+      }
+
       .image-field {
         width: 180px;
       }
 
       .font-size-field {
-        width: 72px;
+        width: 64px;
       }
 
       .color-field {
-        width: 56px;
+        width: 42px;
       }
 
       .selection-toolbar input[type="file"] {
@@ -374,7 +424,7 @@
       }
 
       .preview-field {
-        width: 180px;
+        width: 160px;
       }
 
       .zoom-control {
@@ -407,14 +457,7 @@
       }
 
       .icon-control {
-        display: grid;
-        gap: 6px;
         width: 116px;
-      }
-
-      .icon-control-title {
-        color: var(--muted);
-        font-size: 12px;
       }
 
       .icon-segment {
@@ -492,15 +535,21 @@
         color: var(--ok);
       }
 
+      @media (max-width: 900px) {
+        .selection-toolbar {
+          height: 70px;
+        }
+      }
+
       @media (max-width: 600px) {
         .topbar {
           padding: 8px 12px;
         }
 
         .selection-toolbar {
-          margin: 10px 12px 0;
+          max-width: calc(100% - 24px);
+          margin: 10px auto 0;
           padding: 8px;
-          gap: 10px;
         }
 
         .zoom-control {
@@ -548,30 +597,29 @@
           <button id="saveBtn" type="button" disabled>保存</button>
         </header>
         <div class="selection-toolbar" id="selectionToolbar" role="toolbar" aria-label="选中文本框工具栏" aria-hidden="true">
-        <section class="group">
-          <p class="group-title">文字样式</p>
-          <label class="preview-field">
-            文本预填
-            <input id="previewTextInput" type="text" value="Name preview" />
-          </label>
+        <section class="group format-group" aria-label="文本内容">
+          <input id="previewTextInput" class="preview-field" type="text" value="Name preview" title="文本预填" aria-label="文本预填" />
+        </section>
+        <section class="group format-group" aria-label="字体设置">
+          <select id="fontInput" class="font-field" title="字体" aria-label="字体"></select>
           <div class="grid2">
-            <label class="font-size-field">
-              字号
-              <input id="fontSizeInput" type="number" min="8" step="1" value="48" />
-            </label>
-            <label class="color-field">
-              颜色
-              <input id="colorInput" type="color" value="#000000" />
-            </label>
+            <input id="fontSizeInput" class="font-size-field" type="number" min="8" step="1" value="48" title="字号" aria-label="字号" />
+            <input id="colorInput" class="color-field" type="color" value="#000000" title="颜色" aria-label="颜色" />
           </div>
-          <label class="font-field">
-            字体
-            <select id="fontInput"></select>
-          </label>
+        </section>
+        <section class="group format-group" aria-label="字形设置">
+          <div class="format-toggle-group" role="group" aria-label="文字样式">
+            <button id="boldBtn" class="format-toggle" type="button" title="加粗" aria-label="加粗" aria-pressed="false">B</button>
+            <button id="italicBtn" class="format-toggle" type="button" title="斜体" aria-label="斜体" aria-pressed="false">I</button>
+            <button id="underlineBtn" class="format-toggle" type="button" title="下划线" aria-label="下划线" aria-pressed="false">U</button>
+            <button id="strikethroughBtn" class="format-toggle" type="button" title="删除线" aria-label="删除线" aria-pressed="false">S</button>
+          </div>
+        </section>
+        <section class="group format-group" aria-label="排版与对齐">
           <div class="icon-control-grid">
             <button class="alignment-mode-button" id="alignmentModeBtn" type="button" title="切换为竖版文字" aria-label="切换为竖版文字" aria-pressed="false">↕</button>
             <div class="icon-control">
-              <span class="icon-control-title" id="alignmentModeLabel">横版文字</span>
+              <span id="alignmentModeLabel" hidden>横版文字</span>
               <div class="icon-segment" id="alignControl">
                 <button class="icon-option" type="button" data-value="left" title="左对齐" aria-label="左对齐">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -702,6 +750,12 @@
       const valignControl = document.getElementById("valignControl");
       const alignmentModeBtn = document.getElementById("alignmentModeBtn");
       const alignmentModeLabel = document.getElementById("alignmentModeLabel");
+      const styleButtons = {
+        bold: document.getElementById("boldBtn"),
+        italic: document.getElementById("italicBtn"),
+        underline: document.getElementById("underlineBtn"),
+        strikethrough: document.getElementById("strikethroughBtn"),
+      };
 
       const fontOptions = [
         {
@@ -761,6 +815,7 @@
       let textAlign = "center";
       let textValign = "middle";
       let orientation = "horizontal";
+      const textStyles = { bold: false, italic: false, underline: false, strikethrough: false };
       let templateMode = "new";
       let currentImageDataUrl = "";
       let templateDetails = {};
@@ -834,7 +889,7 @@
 
       function textSize(size = fontSize, width = rect.w, height = rect.h) {
         ctx.save();
-        ctx.font = `${size * scale}px ${currentFontOption().css}`;
+        ctx.font = `${textStyles.italic ? "italic " : ""}${textStyles.bold ? "bold " : ""}${size * scale}px ${currentFontOption().css}`;
         const previewText = previewTextInput.value;
         if (orientation === "vertical") {
           const cellSize = size * 1.2;
@@ -862,7 +917,8 @@
         const lineHeight = size * 1.2;
         return {
           w: metrics.width / scale,
-          h: ascent + descent + (lines.length - 1) * lineHeight + size / 6,
+          h: ascent + descent + (lines.length - 1) * lineHeight + size / 6
+            + (textStyles.underline ? size / 10 : 0),
           ascent,
           descent,
           lineHeight,
@@ -992,8 +1048,10 @@
         const h = rect.h * scale;
         const fontOption = currentFontOption();
         ctx.save();
-        ctx.font = `${previewFontSize}px ${fontOption.css}`;
+        ctx.font = `${textStyles.italic ? "italic " : ""}${textStyles.bold ? "bold " : ""}${previewFontSize}px ${fontOption.css}`;
         ctx.fillStyle = inputs.color.value || "#000000";
+        ctx.strokeStyle = ctx.fillStyle;
+        ctx.lineWidth = Math.max(1, previewFontSize / 20);
         ctx.textBaseline = "alphabetic";
         if (orientation === "vertical") {
           const cell = layout.cellSize * scale;
@@ -1008,8 +1066,24 @@
               const metrics = ctx.measureText(character);
               const ascent = metrics.actualBoundingBoxAscent || previewFontSize * 0.8;
               const descent = metrics.actualBoundingBoxDescent || previewFontSize * 0.2;
-              ctx.fillText(character, columnX,
-                y + offset + row * cell + (cell - ascent - descent) / 2 + ascent);
+              const baseline = y + offset + row * cell + (cell - ascent - descent) / 2 + ascent;
+              ctx.fillText(character, columnX, baseline);
+              if (textStyles.underline || textStyles.strikethrough) {
+                const startX = columnX - metrics.width / 2;
+                const endX = columnX + metrics.width / 2;
+                ctx.beginPath();
+                if (textStyles.underline) {
+                  const lineY = baseline + descent + previewFontSize / 16;
+                  ctx.moveTo(startX, lineY);
+                  ctx.lineTo(endX, lineY);
+                }
+                if (textStyles.strikethrough) {
+                  const lineY = baseline - ascent / 2;
+                  ctx.moveTo(startX, lineY);
+                  ctx.lineTo(endX, lineY);
+                }
+                ctx.stroke();
+              }
             });
           });
           ctx.restore();
@@ -1031,7 +1105,25 @@
           textValign === "bottom" ? extra : textValign === "middle" ? extra / 2 : 0;
         const firstY = y + padding + offset + layout.ascent * scale;
         layout.lines.forEach((line, index) => {
-          ctx.fillText(line, textX, firstY + index * layout.lineHeight * scale);
+          const baseline = firstY + index * layout.lineHeight * scale;
+          ctx.fillText(line, textX, baseline);
+          if (textStyles.underline || textStyles.strikethrough) {
+            const lineWidth = ctx.measureText(line).width;
+            const startX = textAlign === "center" ? textX - lineWidth / 2
+              : textAlign === "right" ? textX - lineWidth : textX;
+            ctx.beginPath();
+            if (textStyles.underline) {
+              const lineY = baseline + layout.descent * scale + previewFontSize / 16;
+              ctx.moveTo(startX, lineY);
+              ctx.lineTo(startX + lineWidth, lineY);
+            }
+            if (textStyles.strikethrough) {
+              const lineY = baseline - layout.ascent * scale / 2;
+              ctx.moveTo(startX, lineY);
+              ctx.lineTo(startX + lineWidth, lineY);
+            }
+            ctx.stroke();
+          }
         });
         ctx.restore();
       }
@@ -1155,6 +1247,12 @@
         inputs.fontsize.value = Math.round(fontSize);
         inputs.color.value = layer.color || "#000000";
         selectFont(layer.font || "");
+        previewTextInput.value = layer.default || "Name preview";
+        for (const style of Object.keys(styleButtons)) {
+          textStyles[style] = layer[style] === true;
+          styleButtons[style].classList.toggle("active", textStyles[style]);
+          styleButtons[style].setAttribute("aria-pressed", String(textStyles[style]));
+        }
         textAlign = layer.align || "center";
         textValign = layer.valign || "middle";
         setOrientation(layer.orientation || "horizontal");
@@ -1218,6 +1316,17 @@
       }
 
       function initIconControls() {
+        for (const [style, button] of Object.entries(styleButtons)) {
+          button.addEventListener("click", () => {
+            textStyles[style] = !textStyles[style];
+            button.classList.toggle("active", textStyles[style]);
+            button.setAttribute("aria-pressed", String(textStyles[style]));
+            if (style === "bold" || style === "italic" || style === "underline") {
+              fitTextHeight();
+            }
+            draw();
+          });
+        }
         alignmentModeBtn.addEventListener("click", () => {
           const centerX = rect.x + rect.w / 2;
           const centerY = rect.y + rect.h / 2;
@@ -1705,6 +1814,11 @@
         payload.align = textAlign;
         payload.valign = textValign;
         payload.orientation = orientation;
+        payload.bold = textStyles.bold;
+        payload.italic = textStyles.italic;
+        payload.underline = textStyles.underline;
+        payload.strikethrough = textStyles.strikethrough;
+        payload.default = previewTextInput.value;
         if (currentFontValue()) {
           payload.font = currentFontValue();
         }

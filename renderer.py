@@ -29,12 +29,11 @@ class TemplateRenderer:
             ValueError: If a required field is missing.
         """
         image = self._create_base_image(template)
-        draw = ImageDraw.Draw(image)
         for layer in template.layers:
             if layer.type == "text":
                 if layer.rotation:
                     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-                    self._render_text_layer(ImageDraw.Draw(overlay), layer, data)
+                    self._render_text_layer(overlay, layer, data)
                     center = (layer.x + layer.w / 2, layer.y + layer.h / 2)
                     image.alpha_composite(
                         overlay.rotate(
@@ -44,7 +43,7 @@ class TemplateRenderer:
                         )
                     )
                 else:
-                    self._render_text_layer(draw, layer, data)
+                    self._render_text_layer(image, layer, data)
                 continue
             raise RenderError(f"Unsupported layer type: {layer.type}")
         return image
@@ -85,14 +84,14 @@ class TemplateRenderer:
 
     def _render_text_layer(
         self,
-        draw: ImageDraw.ImageDraw,
+        image: Image.Image,
         layer: TextLayer,
         data: dict[str, str],
     ) -> None:
         """Render a text layer.
 
         Args:
-            draw: Pillow drawing context.
+            image: Image receiving the text.
             layer: Text layer configuration.
             data: User-provided field values.
 
@@ -106,6 +105,7 @@ class TemplateRenderer:
         if not text:
             return
 
+        draw = ImageDraw.Draw(image)
         font = self._load_font(layer)
         try:
             fill = ImageColor.getrgb(layer.color)
@@ -131,29 +131,58 @@ class TemplateRenderer:
                     else 0
                 )
                 for row, character in enumerate(column):
-                    box = draw.textbbox((0, 0), character, font=font)
-                    glyph_width = box[2] - box[0]
-                    glyph_height = box[3] - box[1]
-                    draw.text(
-                        (
-                            first_x
-                            - column_index * cell_size
-                            + (cell_size - glyph_width) / 2
-                            - box[0],
-                            layer.y
-                            + offset_y
-                            + row * cell_size
-                            + (cell_size - glyph_height) / 2
-                            - box[1],
-                        ),
+                    box = draw.textbbox(
+                        (0, 0),
                         character,
                         font=font,
-                        fill=fill,
+                        stroke_width=max(1, round(layer.fontsize / 24))
+                        if layer.bold
+                        else 0,
                     )
+                    glyph_width = box[2] - box[0]
+                    glyph_height = box[3] - box[1]
+                    x = (
+                        first_x
+                        - column_index * cell_size
+                        + (cell_size - glyph_width) / 2
+                        - box[0]
+                    )
+                    y = (
+                        layer.y
+                        + offset_y
+                        + row * cell_size
+                        + (cell_size - glyph_height) / 2
+                        - box[1]
+                    )
+                    self._draw_styled_run(
+                        image, draw, character, (x, y), font, fill, layer
+                    )
+                    if layer.underline:
+                        underline_y = y + box[3] + max(1, layer.fontsize // 16)
+                        draw.line(
+                            (x + box[0], underline_y, x + box[2], underline_y),
+                            fill=fill,
+                            width=max(1, layer.fontsize // 20),
+                        )
+                    if layer.strikethrough:
+                        strike_y = y + (box[1] + box[3]) / 2
+                        draw.line(
+                            (x + box[0], strike_y, x + box[2], strike_y),
+                            fill=fill,
+                            width=max(1, layer.fontsize // 20),
+                        )
             return
 
         lines = self._wrap_text(draw, text, font, layer.w)
-        boxes = [draw.textbbox((0, 0), line or " ", font=font) for line in lines]
+        boxes = [
+            draw.textbbox(
+                (0, 0),
+                line or " ",
+                font=font,
+                stroke_width=max(1, round(layer.fontsize / 24)) if layer.bold else 0,
+            )
+            for line in lines
+        ]
         line_height = max(1, round(layer.fontsize * 1.2))
         top = min(box[1] + index * line_height for index, box in enumerate(boxes))
         bottom = max(box[3] + index * line_height for index, box in enumerate(boxes))
@@ -173,12 +202,89 @@ class TemplateRenderer:
                 x = layer.x + layer.w - text_width
             else:
                 x = layer.x
+            y = layer.y + offset_y - top + index * line_height
+            self._draw_styled_run(image, draw, line, (x, y), font, fill, layer)
+            if layer.underline:
+                underline_y = y + box[3] + max(1, layer.fontsize // 16)
+                draw.line(
+                    (x + box[0], underline_y, x + box[2], underline_y),
+                    fill=fill,
+                    width=max(1, layer.fontsize // 20),
+                )
+            if layer.strikethrough:
+                strike_y = y + (box[1] + box[3]) / 2
+                draw.line(
+                    (x + box[0], strike_y, x + box[2], strike_y),
+                    fill=fill,
+                    width=max(1, layer.fontsize // 20),
+                )
+
+    def _draw_styled_run(
+        self,
+        image: Image.Image,
+        draw: ImageDraw.ImageDraw,
+        text: str,
+        position: tuple[float, float],
+        font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+        fill: tuple[int, int, int],
+        layer: TextLayer,
+    ) -> None:
+        """Draw one text run with the selected weight and slant.
+
+        Args:
+            image: Image receiving the text.
+            draw: Drawing context for that image.
+            text: Text to draw.
+            position: Text origin in image coordinates.
+            font: Font to use.
+            fill: Text color.
+            layer: Text style settings.
+
+        Returns:
+            None.
+        """
+        stroke = max(1, round(layer.fontsize / 24)) if layer.bold else 0
+        if not layer.italic:
             draw.text(
-                (x, layer.y + offset_y - top + index * line_height),
-                line,
+                position,
+                text,
                 font=font,
                 fill=fill,
+                stroke_width=stroke,
+                stroke_fill=fill,
             )
+            return
+
+        box = draw.textbbox((0, 0), text or " ", font=font, stroke_width=stroke)
+        margin = max(4, round(layer.fontsize / 3))
+        glyph = Image.new(
+            "RGBA",
+            (
+                max(1, box[2] - box[0] + 2 * margin),
+                max(1, box[3] - box[1] + 2 * margin),
+            ),
+        )
+        ImageDraw.Draw(glyph).text(
+            (margin - box[0], margin - box[1]),
+            text,
+            font=font,
+            fill=fill,
+            stroke_width=stroke,
+            stroke_fill=fill,
+        )
+        glyph = glyph.transform(
+            glyph.size,
+            Image.Transform.AFFINE,
+            (1, 0.24, -0.12 * glyph.height, 0, 1, 0),
+            resample=Image.Resampling.BICUBIC,
+        )
+        image.alpha_composite(
+            glyph,
+            (
+                round(position[0] + box[0] - margin),
+                round(position[1] + box[1] - margin),
+            ),
+        )
 
     def _wrap_text(
         self,
