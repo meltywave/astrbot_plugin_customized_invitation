@@ -71,7 +71,31 @@
       }
 
       .topbar-title {
+        display: flex;
+        align-items: center;
+        gap: 12px;
         flex: none;
+      }
+
+      .history-controls {
+        display: flex;
+        gap: 4px;
+      }
+
+      .history-button {
+        width: 34px;
+        min-height: 34px;
+        padding: 0;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--text);
+        font-size: 20px;
+        line-height: 1;
+      }
+
+      .history-button:hover:not(:disabled) {
+        background: var(--soft);
+        color: var(--accent);
       }
 
       .topbar h1 {
@@ -566,6 +590,10 @@
         <header class="topbar">
           <div class="topbar-title">
             <h1 id="templateName"></h1>
+            <div class="history-controls" role="group" aria-label="编辑历史">
+              <button id="undoBtn" class="history-button" type="button" title="撤销" aria-label="撤销" disabled>↶</button>
+              <button id="redoBtn" class="history-button" type="button" title="重做" aria-label="重做" disabled>↷</button>
+            </div>
             <div id="status" class="status"></div>
           </div>
           <div class="topbar-controls">
@@ -736,6 +764,8 @@
       const ctx = canvas.getContext("2d");
       const imageInput = document.getElementById("imageInput");
       const saveBtn = document.getElementById("saveBtn");
+      const undoBtn = document.getElementById("undoBtn");
+      const redoBtn = document.getElementById("redoBtn");
       const statusEl = document.getElementById("status");
       const templateSelect = document.getElementById("templateSelect");
       const templateSelectLabel = document.getElementById("templateSelectLabel");
@@ -812,6 +842,8 @@
       let selected = false;
       let dragMode = "";
       let dragStart = null;
+      let history = [];
+      let historyIndex = -1;
       let textAlign = "center";
       let textValign = "middle";
       let orientation = "horizontal";
@@ -841,6 +873,84 @@
 
       function currentFontValue() {
         return inputs.font.value;
+      }
+
+      function editorSnapshot() {
+        return {
+          rect: { ...rect },
+          fontSize,
+          rotation,
+          textAlign,
+          textValign,
+          orientation,
+          textStyles: { ...textStyles },
+          font: inputs.font.value,
+          color: inputs.color.value,
+          previewText: previewTextInput.value,
+        };
+      }
+
+      function updateHistoryButtons() {
+        undoBtn.disabled = historyIndex <= 0;
+        redoBtn.disabled = historyIndex < 0 || historyIndex >= history.length - 1;
+      }
+
+      function resetHistory() {
+        history = [editorSnapshot()];
+        historyIndex = 0;
+        updateHistoryButtons();
+      }
+
+      function recordHistory() {
+        const next = editorSnapshot();
+        if (
+          historyIndex >= 0 &&
+          JSON.stringify(history[historyIndex]) === JSON.stringify(next)
+        ) {
+          return;
+        }
+        history = history.slice(0, historyIndex + 1);
+        history.push(next);
+        historyIndex = history.length - 1;
+        updateHistoryButtons();
+      }
+
+      function restoreHistory(index) {
+        if (index < 0 || index >= history.length || index === historyIndex) {
+          return;
+        }
+        historyIndex = index;
+        const snapshot = history[historyIndex];
+        rect = { ...snapshot.rect };
+        fontSize = snapshot.fontSize;
+        rotation = snapshot.rotation;
+        textAlign = snapshot.textAlign;
+        textValign = snapshot.textValign;
+        textStyles.bold = snapshot.textStyles.bold;
+        textStyles.italic = snapshot.textStyles.italic;
+        textStyles.underline = snapshot.textStyles.underline;
+        textStyles.strikethrough = snapshot.textStyles.strikethrough;
+        inputs.font.value = snapshot.font;
+        inputs.color.value = snapshot.color;
+        inputs.fontsize.value = Math.round(fontSize);
+        previewTextInput.value = snapshot.previewText;
+        setOrientation(snapshot.orientation);
+        for (const style of Object.keys(styleButtons)) {
+          styleButtons[style].classList.toggle("active", textStyles[style]);
+          styleButtons[style].setAttribute("aria-pressed", String(textStyles[style]));
+        }
+        setIconControlValue(alignControl, textAlign);
+        setIconControlValue(valignControl, textValign);
+        updateHistoryButtons();
+        draw();
+      }
+
+      function undo() {
+        restoreHistory(historyIndex - 1);
+      }
+
+      function redo() {
+        restoreHistory(historyIndex + 1);
       }
 
       function updateSaveState() {
@@ -1260,6 +1370,7 @@
         setIconControlValue(valignControl, textValign);
         fitTextHeight();
         draw();
+        resetHistory();
         updateSaveState();
       }
 
@@ -1325,6 +1436,7 @@
               fitTextHeight();
             }
             draw();
+            recordHistory();
           });
         }
         alignmentModeBtn.addEventListener("click", () => {
@@ -1351,6 +1463,7 @@
           rect.y = Math.min(Math.max(rect.y, nextLimits.top + nextLimits.extentY - rect.h / 2),
             nextLimits.bottom - nextLimits.extentY - rect.h / 2);
           draw();
+          recordHistory();
         });
         alignControl.addEventListener("click", (event) => {
           const button = event.target.closest(".icon-option");
@@ -1360,6 +1473,7 @@
           textAlign = button.dataset.value || "center";
           setIconControlValue(alignControl, textAlign);
           draw();
+          recordHistory();
         });
         valignControl.addEventListener("click", (event) => {
           const button = event.target.closest(".icon-option");
@@ -1369,6 +1483,7 @@
           textValign = button.dataset.value || "middle";
           setIconControlValue(valignControl, textValign);
           draw();
+          recordHistory();
         });
         setIconControlValue(alignControl, textAlign);
         setIconControlValue(valignControl, textValign);
@@ -1506,6 +1621,8 @@
       existingTemplateBtn.addEventListener("click", () =>
         setTemplateMode("existing"),
       );
+      undoBtn.addEventListener("click", undo);
+      redoBtn.addEventListener("click", redo);
 
       imageInput.addEventListener("change", async () => {
         imageFile = imageInput.files?.[0] || null;
@@ -1528,6 +1645,7 @@
         rotation = 0;
         inputs.fontsize.value = fontSize;
         draw();
+        resetHistory();
         updateSaveState();
         setStatus("");
       });
@@ -1536,15 +1654,21 @@
         fontSize = Math.max(8, Number(inputs.fontsize.value) || 48);
         fitTextHeight();
         draw();
+        recordHistory();
       });
-      inputs.color.addEventListener("input", draw);
+      inputs.color.addEventListener("input", () => {
+        draw();
+        recordHistory();
+      });
       inputs.font.addEventListener("change", () => {
         fitTextHeight();
         draw();
+        recordHistory();
       });
       previewTextInput.addEventListener("input", () => {
         fitTextHeight();
         draw();
+        recordHistory();
       });
       zoomInput.addEventListener("input", () => {
         zoom = Number(zoomInput.value) / 100;
@@ -1745,6 +1869,9 @@
       });
 
       function endDrag(event) {
+        if (dragStart) {
+          recordHistory();
+        }
         dragMode = "";
         dragStart = null;
         draw();
@@ -1783,6 +1910,7 @@
           rect.y = Math.min(Math.max(rect.y + dy, minY), maxY);
         }
         draw();
+        recordHistory();
       });
 
       saveBtn.addEventListener("click", async () => {
@@ -1841,6 +1969,7 @@
       setTemplateMode("new");
       fitTextHeight();
       draw();
+      resetHistory();
       loadTemplates();
     </script>
   </body>

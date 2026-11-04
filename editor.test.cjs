@@ -59,6 +59,7 @@ function createEditor(templateData = { templates: {} }) {
       elements.set(id, {
         id,
         value: id === "fontSizeInput" ? "48" : id === "previewTextInput" ? "Name preview" : id === "zoomInput" ? "100" : "",
+        disabled: id === "undoBtn" || id === "redoBtn",
         style: {},
         offsetHeight: id === "selectionToolbar" ? 100 : 0,
         classList: {
@@ -245,6 +246,101 @@ test("template name is shown as the title and stays editable above the selection
   editor.element("templateNameInput").dispatch("input");
   assert.equal(editor.element("templateName").textContent, "Spring invitation");
   assert.match(html, /<header class="topbar">[\s\S]*?id="newTemplateBtn"[\s\S]*?id="imageInput"[\s\S]*?<\/header>/);
+});
+
+test("undo and redo buttons sit beside the template title", () => {
+  assert.match(html, /<h1 id="templateName"><\/h1>\s*<div class="history-controls"[\s\S]*?id="undoBtn"[\s\S]*?id="redoBtn"/);
+});
+
+test("undo and redo restore box geometry and branch after a new edit", () => {
+  const editor = createEditor();
+  assert.equal(editor.element("undoBtn").disabled, true);
+  assert.equal(editor.element("redoBtn").disabled, true);
+
+  const before = editor.state();
+  editor.pointer("pointerdown", 150, 250);
+  editor.pointer("pointermove", 180, 270);
+  editor.pointer("pointerup", 180, 270);
+  assert.equal(editor.state().x, before.x + 30);
+  assert.equal(editor.element("undoBtn").disabled, false);
+  editor.element("undoBtn").dispatch("click");
+  assert.equal(editor.state().x, before.x);
+  assert.equal(editor.state().y, before.y);
+  assert.equal(editor.element("redoBtn").disabled, false);
+  editor.element("redoBtn").dispatch("click");
+  assert.equal(editor.state().x, before.x + 30);
+  assert.equal(editor.state().y, before.y + 20);
+  editor.element("undoBtn").dispatch("click");
+  editor.pointer("pointerdown", before.x + 30, before.y + 20);
+  editor.pointer("pointermove", before.x + 50, before.y + 10);
+  editor.pointer("pointerup", before.x + 50, before.y + 10);
+  assert.equal(editor.element("redoBtn").disabled, true);
+  editor.element("redoBtn").dispatch("click");
+  assert.equal(editor.state().x, before.x + 20);
+  assert.equal(editor.state().y, before.y - 10);
+});
+
+test("undo and redo restore text, font styles, and orientation", () => {
+  const editor = createEditor();
+  const preview = editor.element("previewTextInput");
+  preview.value = "First";
+  preview.dispatch("input");
+  assert.equal(editor.evaluate("editorSnapshot().previewText"), "First");
+  assert.deepEqual(Array.from(editor.evaluate("history.map(item => item.previewText)")), ["Name preview", "First"]);
+  preview.value = "Second";
+  preview.dispatch("input");
+  assert.deepEqual(Array.from(editor.evaluate("history.map(item => item.previewText)")), ["Name preview", "First", "Second"]);
+  editor.element("boldBtn").dispatch("click");
+  editor.element("alignmentModeBtn").dispatch("click");
+  assert.deepEqual(
+    JSON.parse(editor.evaluate("JSON.stringify(history.map(item => [item.previewText, item.orientation, item.textStyles.bold]))")),
+    [["Name preview", "horizontal", false], ["First", "horizontal", false],
+      ["Second", "horizontal", false], ["Second", "horizontal", true],
+      ["Second", "vertical", true]],
+  );
+
+  editor.element("undoBtn").dispatch("click");
+  assert.equal(editor.evaluate("orientation"), "horizontal");
+  assert.equal(editor.evaluate("textStyles.bold"), true);
+  editor.element("undoBtn").dispatch("click");
+  assert.equal(editor.evaluate("textStyles.bold"), false);
+  editor.element("undoBtn").dispatch("click");
+  assert.equal(editor.element("previewTextInput").value, "First");
+
+  editor.element("redoBtn").dispatch("click");
+  assert.equal(editor.element("previewTextInput").value, "Second");
+  editor.element("redoBtn").dispatch("click");
+  assert.equal(editor.evaluate("textStyles.bold"), true);
+  editor.element("redoBtn").dispatch("click");
+  assert.equal(editor.evaluate("orientation"), "vertical");
+});
+
+test("loading another template resets undo and redo history", async () => {
+  const editor = createEditor({
+    templates: {
+      saved: {
+        background: "data:image/png;base64,AA==",
+        layer: { x: 100, y: 100, w: 300, h: 80, fontsize: 40 },
+      },
+    },
+    user_templates: ["saved"],
+  });
+  await new Promise(setImmediate);
+  const before = editor.state();
+  editor.pointer("pointerdown", 150, 250);
+  editor.pointer("pointermove", 170, 250);
+  editor.pointer("pointerup", 170, 250);
+  assert.equal(editor.element("undoBtn").disabled, false);
+
+  editor.evaluate('templateMode = "existing"');
+  editor.element("templateSelect").value = "saved";
+  await editor.element("templateSelect").dispatch("change");
+  assert.equal(editor.element("undoBtn").disabled, true);
+  assert.equal(editor.element("redoBtn").disabled, true);
+  assert.equal(editor.state().x, 100);
+  editor.element("undoBtn").dispatch("click");
+  assert.equal(editor.state().x, 100);
+  assert.notEqual(editor.state().x, before.x + 20);
 });
 
 test("prefill text replaces the canvas preview as it is typed", () => {
