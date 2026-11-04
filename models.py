@@ -18,6 +18,7 @@ class TextLayer:
         fontsize: Font size in pixels.
         align: Horizontal alignment, left, center, or right.
         valign: Vertical alignment, top, middle, or bottom.
+        orientation: Text flow, horizontal or vertical.
         color: Text color in hex format.
         rotation: Clockwise rotation in degrees around the box center.
         required: Whether this field must be provided by the user.
@@ -34,6 +35,7 @@ class TextLayer:
     fontsize: int = 48
     align: str = "left"
     valign: str = "top"
+    orientation: str = "horizontal"
     color: str = "#000000"
     rotation: int = 0
     required: bool = True

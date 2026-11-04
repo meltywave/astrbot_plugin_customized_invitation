@@ -220,6 +220,7 @@ class CustomizedInvitationPlugin(Star):
                         "font": layer.font if layer else "",
                         "align": layer.align if layer else "center",
                         "valign": layer.valign if layer else "middle",
+                        "orientation": layer.orientation if layer else "horizontal",
                     },
                 }
             except (OSError, TemplateConfigError) as err:
@@ -292,6 +293,7 @@ class CustomizedInvitationPlugin(Star):
             "rotation",
             "align",
             "valign",
+            "orientation",
             "color",
             "font",
             "default",

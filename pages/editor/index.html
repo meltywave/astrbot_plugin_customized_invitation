@@ -53,11 +53,12 @@
         top: 0;
         z-index: 3;
         min-width: 0;
-        background: var(--panel);
+        background: var(--bg);
       }
 
       .topbar {
         display: flex;
+        background: var(--panel);
         align-items: center;
         justify-content: space-between;
         flex-wrap: nowrap;
@@ -167,6 +168,28 @@
 
       .selection-handle.left { left: 0; }
       .selection-handle.right { left: 100%; }
+
+      .selection-handle.top,
+      .selection-handle.bottom {
+        display: none;
+        left: 50%;
+        width: 18px;
+        height: 8px;
+        border-radius: 0;
+      }
+
+      .selection-handle.top { top: 0; }
+      .selection-handle.bottom { top: 100%; }
+
+      .selection-box.vertical .selection-handle.left,
+      .selection-box.vertical .selection-handle.right {
+        display: none;
+      }
+
+      .selection-box.vertical .selection-handle.top,
+      .selection-box.vertical .selection-handle.bottom {
+        display: block;
+      }
 
       .rotation-handle {
         display: none;
@@ -290,7 +313,18 @@
 
       .icon-control-grid {
         display: flex;
+        align-items: flex-end;
         gap: 8px;
+      }
+
+      .alignment-mode-button {
+        flex: none;
+        width: 36px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--accent);
+        font-size: 20px;
+        padding: 0;
       }
 
       .mode-switch {
@@ -535,8 +569,9 @@
             <select id="fontInput"></select>
           </label>
           <div class="icon-control-grid">
+            <button class="alignment-mode-button" id="alignmentModeBtn" type="button" title="切换为竖版文字" aria-label="切换为竖版文字" aria-pressed="false">↕</button>
             <div class="icon-control">
-              <span class="icon-control-title">水平</span>
+              <span class="icon-control-title" id="alignmentModeLabel">横版文字</span>
               <div class="icon-segment" id="alignControl">
                 <button class="icon-option" type="button" data-value="left" title="左对齐" aria-label="左对齐">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -563,10 +598,7 @@
                   </svg>
                 </button>
               </div>
-            </div>
-            <div class="icon-control">
-              <span class="icon-control-title">垂直</span>
-              <div class="icon-segment" id="valignControl">
+              <div class="icon-segment" id="valignControl" hidden>
                 <button class="icon-option" type="button" data-value="top" title="顶部对齐" aria-label="顶部对齐">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M5 5h14" />
@@ -609,6 +641,8 @@
               <span class="selection-handle sw"></span>
               <span class="selection-handle left"></span>
               <span class="selection-handle right"></span>
+              <span class="selection-handle top"></span>
+              <span class="selection-handle bottom"></span>
               <span class="rotation-handle" title="旋转" aria-hidden="true">↻</span>
             </div>
             <span class="rotation-angle" id="rotationAngle"></span>
@@ -666,6 +700,8 @@
       const existingTemplateBtn = document.getElementById("existingTemplateBtn");
       const alignControl = document.getElementById("alignControl");
       const valignControl = document.getElementById("valignControl");
+      const alignmentModeBtn = document.getElementById("alignmentModeBtn");
+      const alignmentModeLabel = document.getElementById("alignmentModeLabel");
 
       const fontOptions = [
         {
@@ -724,6 +760,7 @@
       let dragStart = null;
       let textAlign = "center";
       let textValign = "middle";
+      let orientation = "horizontal";
       let templateMode = "new";
       let currentImageDataUrl = "";
       let templateDetails = {};
@@ -795,10 +832,24 @@
         return lines;
       }
 
-      function textSize(size = fontSize, width = rect.w) {
+      function textSize(size = fontSize, width = rect.w, height = rect.h) {
         ctx.save();
         ctx.font = `${size * scale}px ${currentFontOption().css}`;
         const previewText = previewTextInput.value;
+        if (orientation === "vertical") {
+          const cellSize = size * 1.2;
+          const rows = Math.max(1, Math.floor(height / cellSize));
+          const columns = previewText.split(/\r?\n/).flatMap((paragraph) => {
+            const characters = Array.from(paragraph);
+            const parts = [];
+            for (let index = 0; index < Math.max(1, characters.length); index += rows) {
+              parts.push(characters.slice(index, index + rows));
+            }
+            return parts;
+          });
+          ctx.restore();
+          return { w: columns.length * cellSize, h: height, cellSize, columns };
+        }
         const metrics = ctx.measureText(previewText);
         const lines = wrapText(
           previewText,
@@ -820,6 +871,30 @@
       }
 
       function fitTextHeight(keepCenter = true) {
+        if (orientation === "vertical") {
+          const limits = boxLimits(rect);
+          const radians = (rotation * Math.PI) / 180;
+          const cosine = Math.abs(Math.cos(radians));
+          const sine = Math.abs(Math.sin(radians));
+          const maxWidth = Math.min(
+            cosine ? (limits.right - limits.left - sine * rect.h) / cosine : Infinity,
+            sine ? (limits.bottom - limits.top - cosine * rect.h) / sine : Infinity,
+          );
+          const width = Math.max(1, Math.min(textSize().w, maxWidth));
+          if (keepCenter) {
+            rect.x += (rect.w - width) / 2;
+          }
+          rect.w = width;
+          const nextLimits = boxLimits(rect);
+          if (nextLimits.extentX * 2 <= nextLimits.right - nextLimits.left &&
+              nextLimits.extentY * 2 <= nextLimits.bottom - nextLimits.top) {
+            rect.x = Math.min(Math.max(rect.x, nextLimits.left + nextLimits.extentX - rect.w / 2),
+              nextLimits.right - nextLimits.extentX - rect.w / 2);
+            rect.y = Math.min(Math.max(rect.y, nextLimits.top + nextLimits.extentY - rect.h / 2),
+              nextLimits.bottom - nextLimits.extentY - rect.h / 2);
+          }
+          return;
+        }
         const height = Math.max(1, textSize().h);
         if (keepCenter) {
           rect.y += (rect.h - height) / 2;
@@ -877,9 +952,14 @@
           ne: [rect.x + rect.w, rect.y],
           se: [rect.x + rect.w, rect.y + rect.h],
           sw: [rect.x, rect.y + rect.h],
-          left: [rect.x, rect.y + rect.h / 2],
-          right: [rect.x + rect.w, rect.y + rect.h / 2],
         };
+        if (orientation === "vertical") {
+          handles.top = [rect.x + rect.w / 2, rect.y];
+          handles.bottom = [rect.x + rect.w / 2, rect.y + rect.h];
+        } else {
+          handles.left = [rect.x, rect.y + rect.h / 2];
+          handles.right = [rect.x + rect.w, rect.y + rect.h / 2];
+        }
         if (selected &&
             Math.hypot(local.x - rect.x - rect.w / 2, local.y - rect.y - rect.h - 28 / displayScale) <= radius) {
           return "rotate";
@@ -915,6 +995,26 @@
         ctx.font = `${previewFontSize}px ${fontOption.css}`;
         ctx.fillStyle = inputs.color.value || "#000000";
         ctx.textBaseline = "alphabetic";
+        if (orientation === "vertical") {
+          const cell = layout.cellSize * scale;
+          ctx.textAlign = "center";
+          layout.columns.forEach((column, columnIndex) => {
+            const spare = Math.max(0, h - column.length * cell);
+            const offset = textValign === "bottom" ? spare
+              : textValign === "middle" ? spare / 2 : 0;
+            const columnX = x + (w + layout.columns.length * cell) / 2
+              - cell / 2 - columnIndex * cell;
+            column.forEach((character, row) => {
+              const metrics = ctx.measureText(character);
+              const ascent = metrics.actualBoundingBoxAscent || previewFontSize * 0.8;
+              const descent = metrics.actualBoundingBoxDescent || previewFontSize * 0.2;
+              ctx.fillText(character, columnX,
+                y + offset + row * cell + (cell - ascent - descent) / 2 + ascent);
+            });
+          });
+          ctx.restore();
+          return;
+        }
         ctx.textAlign = textAlign;
         const textX =
           textAlign === "center"
@@ -966,6 +1066,7 @@
         selectionBox.style.height = `${(rect.h / bounds.height) * 100}%`;
         selectionBox.style.transform = `rotate(${rotation}deg)`;
         selectionBox.classList.toggle("selected", selected);
+        selectionBox.classList.toggle("vertical", orientation === "vertical");
 
         const axis = ((rotation % 180) + 180) % 180;
         const horizontal = Math.min(axis, 180 - axis) <= 2;
@@ -1056,6 +1157,7 @@
         selectFont(layer.font || "");
         textAlign = layer.align || "center";
         textValign = layer.valign || "middle";
+        setOrientation(layer.orientation || "horizontal");
         setIconControlValue(alignControl, textAlign);
         setIconControlValue(valignControl, textValign);
         fitTextHeight();
@@ -1103,7 +1205,44 @@
         });
       }
 
+      function setOrientation(value) {
+        orientation = value === "vertical" ? "vertical" : "horizontal";
+        const vertical = orientation === "vertical";
+        alignControl.hidden = vertical;
+        valignControl.hidden = !vertical;
+        alignmentModeLabel.textContent = vertical ? "竖版文字" : "横版文字";
+        alignmentModeBtn.textContent = vertical ? "↔" : "↕";
+        alignmentModeBtn.title = vertical ? "切换为横版文字" : "切换为竖版文字";
+        alignmentModeBtn.setAttribute("aria-label", alignmentModeBtn.title);
+        alignmentModeBtn.setAttribute("aria-pressed", String(vertical));
+      }
+
       function initIconControls() {
+        alignmentModeBtn.addEventListener("click", () => {
+          const centerX = rect.x + rect.w / 2;
+          const centerY = rect.y + rect.h / 2;
+          const limits = boxLimits(rect);
+          const swapped = { w: rect.h, h: rect.w };
+          const radians = (rotation * Math.PI) / 180;
+          const extentX = Math.abs(Math.cos(radians)) * swapped.w
+            + Math.abs(Math.sin(radians)) * swapped.h;
+          const extentY = Math.abs(Math.sin(radians)) * swapped.w
+            + Math.abs(Math.cos(radians)) * swapped.h;
+          const factor = Math.min(1, (limits.right - limits.left) / extentX,
+            (limits.bottom - limits.top) / extentY);
+          rect.w = swapped.w * factor;
+          rect.h = swapped.h * factor;
+          rect.x = centerX - rect.w / 2;
+          rect.y = centerY - rect.h / 2;
+          setOrientation(orientation === "horizontal" ? "vertical" : "horizontal");
+          fitTextHeight();
+          const nextLimits = boxLimits(rect);
+          rect.x = Math.min(Math.max(rect.x, nextLimits.left + nextLimits.extentX - rect.w / 2),
+            nextLimits.right - nextLimits.extentX - rect.w / 2);
+          rect.y = Math.min(Math.max(rect.y, nextLimits.top + nextLimits.extentY - rect.h / 2),
+            nextLimits.bottom - nextLimits.extentY - rect.h / 2);
+          draw();
+        });
         alignControl.addEventListener("click", (event) => {
           const button = event.target.closest(".icon-option");
           if (!button) {
@@ -1124,6 +1263,7 @@
         });
         setIconControlValue(alignControl, textAlign);
         setIconControlValue(valignControl, textValign);
+        setOrientation(orientation);
       }
 
       async function getPluginBridge() {
@@ -1335,12 +1475,15 @@
         };
       }
 
-      function resizeFromAnchor(start, anchorX, anchorY, width, height, nextFontSize, heightForWidth) {
+      function resizeFromAnchor(start, anchorX, anchorY, width, height, nextFontSize, heightForWidth, widthForHeight) {
         const candidate = (amount) => {
-          const candidateWidth = start.w + (width - start.w) * amount;
+          const scaledHeight = start.h + (height - start.h) * amount;
+          const candidateWidth = widthForHeight
+            ? widthForHeight(scaledHeight)
+            : start.w + (width - start.w) * amount;
           const candidateHeight = heightForWidth
             ? heightForWidth(candidateWidth)
-            : start.h + (height - start.h) * amount;
+            : scaledHeight;
           return rectFromAnchor(start, anchorX, anchorY, candidateWidth, candidateHeight);
         };
         let amount = 1;
@@ -1382,7 +1525,22 @@
           resizeFromAnchor(
             start, mode === "left" ? 1 : 0, 0.5,
             width, start.h, dragStart.fontSize,
-            (candidateWidth) => textSize(dragStart.fontSize, candidateWidth).h,
+            (candidateWidth) => orientation === "vertical"
+              ? start.h : textSize(dragStart.fontSize, candidateWidth).h,
+          );
+          return;
+        }
+        if (mode === "top" || mode === "bottom") {
+          const height = Math.max(
+            dragStart.fontSize * 1.2,
+            start.h + delta.y * (mode === "bottom" ? 1 : -1),
+          );
+          resizeFromAnchor(
+            start, 0.5, mode === "top" ? 1 : 0,
+            start.w, height, dragStart.fontSize,
+            null,
+            (candidateHeight) => Math.max(1,
+              textSize(dragStart.fontSize, start.w, candidateHeight).w),
           );
           return;
         }
@@ -1406,6 +1564,7 @@
         }
         const baseAngle = handle === "left" || handle === "right"
           ? 0
+          : handle === "top" || handle === "bottom" ? 90
           : handle === "nw" || handle === "se" ? 45 : 135;
         const index = ((Math.round((baseAngle + rotation) / 45) % 4) + 4) % 4;
         return ["ew-resize", "nwse-resize", "ns-resize", "nesw-resize"][index];
@@ -1545,6 +1704,7 @@
         payload.color = inputs.color.value || "#000000";
         payload.align = textAlign;
         payload.valign = textValign;
+        payload.orientation = orientation;
         if (currentFontValue()) {
           payload.font = currentFontValue();
         }

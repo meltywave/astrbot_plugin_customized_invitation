@@ -29,24 +29,114 @@ class EditorBackendTests(unittest.TestCase):
         (template_dir / "config.json").write_text(
             json.dumps(
                 {
-                    "name": "legacy", "width": 120, "height": 120,
-                    "layers": [{
-                        "id": "name", "type": "text", "field": "name",
-                        "x": 20, "y": 40, "w": 80, "h": 30, "fontsize": 20,
-                    }],
+                    "name": "legacy",
+                    "width": 120,
+                    "height": 120,
+                    "layers": [
+                        {
+                            "id": "name",
+                            "type": "text",
+                            "field": "name",
+                            "x": 20,
+                            "y": 40,
+                            "w": 80,
+                            "h": 30,
+                            "fontsize": 20,
+                        }
+                    ],
                 }
             ),
             encoding="utf-8",
         )
         self.assertEqual(self.manager.load("legacy").layers[0].rotation, 0)
+        self.assertEqual(
+            self.manager.load("legacy").layers[0].orientation, "horizontal"
+        )
+
+    def test_vertical_orientation_round_trip_and_rendering(self) -> None:
+        source = self.root / "source.png"
+        Image.new("RGB", (220, 260), "white").save(source)
+        template = self.manager.create_from_image(
+            "vertical",
+            source,
+            {
+                "x": "80",
+                "y": "20",
+                "w": "60",
+                "h": "210",
+                "fontsize": "30",
+                "orientation": "vertical",
+                "valign": "top",
+                "color": "#000000",
+            },
+        )
+        self.assertEqual(template.layers[0].orientation, "vertical")
+        self.assertEqual(
+            self.manager.load("vertical").layers[0].orientation, "vertical"
+        )
+        config = json.loads((self.root / "vertical" / "config.json").read_text("utf-8"))
+        self.assertEqual(config["layers"][0]["orientation"], "vertical")
+
+        image = TemplateRenderer(self.root / "fonts").render(template, {"name": "MMMM"})
+        bounds = (
+            image.convert("L").point(lambda value: 255 if value < 128 else 0).getbbox()
+        )
+        self.assertIsNotNone(bounds)
+        self.assertGreater(bounds[3] - bounds[1], (bounds[2] - bounds[0]) * 2)
+
+    def test_invalid_orientation_is_rejected(self) -> None:
+        source = self.root / "source.png"
+        Image.new("RGB", (100, 100), "white").save(source)
+        with self.assertRaisesRegex(TemplateConfigError, "orientation is invalid"):
+            self.manager.create_from_image("bad", source, {"orientation": "diagonal"})
+
+    def test_vertical_alignment_moves_text_down(self) -> None:
+        source = self.root / "source.png"
+        Image.new("RGB", (180, 300), "white").save(source)
+        options = {
+            "x": "60",
+            "y": "20",
+            "w": "60",
+            "h": "250",
+            "fontsize": "30",
+            "orientation": "vertical",
+            "color": "#000000",
+        }
+        top = self.manager.create_from_image(
+            "top", source, {**options, "valign": "top"}
+        )
+        bottom = self.manager.create_from_image(
+            "bottom", source, {**options, "valign": "bottom"}
+        )
+        renderer = TemplateRenderer(self.root / "fonts")
+        top_bounds = (
+            renderer.render(top, {"name": "AB"})
+            .convert("L")
+            .point(lambda value: 255 if value < 128 else 0)
+            .getbbox()
+        )
+        bottom_bounds = (
+            renderer.render(bottom, {"name": "AB"})
+            .convert("L")
+            .point(lambda value: 255 if value < 128 else 0)
+            .getbbox()
+        )
+        self.assertIsNotNone(top_bounds)
+        self.assertIsNotNone(bottom_bounds)
+        self.assertGreater(bottom_bounds[1], top_bounds[1])
 
     def test_rotation_round_trip_and_rendering(self) -> None:
         source = self.root / "source.png"
         Image.new("RGB", (240, 160), "white").save(source)
         common = {
-            "x": "50", "y": "55", "w": "140", "h": "50",
-            "fontsize": "40", "color": "#000000",
-            "align": "center", "valign": "middle",
+            "x": "50",
+            "y": "55",
+            "w": "140",
+            "h": "50",
+            "fontsize": "40",
+            "color": "#000000",
+            "align": "center",
+            "valign": "middle",
         }
         original = self.manager.create_from_image("plain", source, common)
         turned = self.manager.create_from_image(
@@ -72,16 +162,18 @@ class EditorBackendTests(unittest.TestCase):
         turned_bounds = dark_bounds(turned_image)
         self.assertIsNotNone(plain_bounds)
         self.assertIsNotNone(turned_bounds)
-        self.assertGreater(plain_bounds[2] - plain_bounds[0], plain_bounds[3] - plain_bounds[1])
-        self.assertGreater(turned_bounds[3] - turned_bounds[1], turned_bounds[2] - turned_bounds[0])
+        self.assertGreater(
+            plain_bounds[2] - plain_bounds[0], plain_bounds[3] - plain_bounds[1]
+        )
+        self.assertGreater(
+            turned_bounds[3] - turned_bounds[1], turned_bounds[2] - turned_bounds[0]
+        )
 
     def test_invalid_rotation_is_rejected(self) -> None:
         source = self.root / "source.png"
         Image.new("RGB", (100, 100), "white").save(source)
         with self.assertRaises(TemplateConfigError):
-            self.manager.create_from_image(
-                "bad", source, {"rotation": "not-a-number"}
-            )
+            self.manager.create_from_image("bad", source, {"rotation": "not-a-number"})
 
     def test_narrow_box_wraps_text_without_squeezing(self) -> None:
         source = self.root / "source.png"
@@ -90,8 +182,13 @@ class EditorBackendTests(unittest.TestCase):
             "narrow",
             source,
             {
-                "x": "40", "y": "30", "w": "60", "h": "40",
-                "fontsize": "32", "align": "left", "valign": "top",
+                "x": "40",
+                "y": "30",
+                "w": "60",
+                "h": "40",
+                "fontsize": "32",
+                "align": "left",
+                "valign": "top",
             },
         )
         renderer = TemplateRenderer(self.root / "fonts")

@@ -38,7 +38,7 @@ function createEditor(templateData = { templates: {} }) {
       };
     },
     fillText(text, x, y, maxWidth) {
-      textDraws.push({ text, font: this.font, maxWidth });
+      textDraws.push({ text, x, y, font: this.font, maxWidth });
     },
   };
 
@@ -249,6 +249,97 @@ test("prefill text replaces the canvas preview as it is typed", () => {
   preview.value = "";
   preview.dispatch("input");
   assert.equal(editor.textDraws.at(-1).text, "");
+});
+
+test("orientation button switches the shared alignment control and vertical preview", async () => {
+  const editor = createEditor();
+  const toggle = editor.element("alignmentModeBtn");
+  assert.equal(editor.element("alignControl").hidden, false);
+  assert.equal(editor.element("valignControl").hidden, true);
+  toggle.dispatch("click");
+  assert.equal(editor.evaluate("orientation"), "vertical");
+  assert.equal(toggle.getAttribute("aria-pressed"), "true");
+  assert.equal(toggle.getAttribute("aria-label"), "切换为横版文字");
+  assert.equal(editor.element("alignmentModeLabel").textContent, "竖版文字");
+  assert.equal(editor.element("alignControl").hidden, true);
+  assert.equal(editor.element("valignControl").hidden, false);
+  const glyphs = editor.textDraws.slice(-12);
+  assert.equal(glyphs.map((draw) => draw.text).join(""), "Name preview");
+  assert.ok(glyphs.every((draw) => draw.x === glyphs[0].x));
+  assert.ok(glyphs.every((draw, index) => index === 0 || draw.y > glyphs[index - 1].y));
+  assert.ok(editor.state().h > editor.state().w);
+
+  editor.element("templateNameInput").value = "vertical";
+  editor.setImageDataUrl("data:image/png;base64,AA==");
+  await editor.element("saveBtn").dispatch("click");
+  assert.equal(editor.saved[0].orientation, "vertical");
+
+  toggle.dispatch("click");
+  assert.equal(editor.evaluate("orientation"), "horizontal");
+  assert.equal(toggle.getAttribute("aria-pressed"), "false");
+  assert.equal(editor.element("alignControl").hidden, false);
+  assert.equal(editor.element("valignControl").hidden, true);
+  assert.equal(editor.element("selectionBox").classList.contains("vertical"), false);
+  assert.equal(editor.textDraws.at(-1).text, "Name preview");
+});
+
+test("vertical preview wraps into columns from right to left", () => {
+  const editor = createEditor();
+  editor.element("alignmentModeBtn").dispatch("click");
+  editor.evaluate("rect.h = 120; rect.w = 250; draw()");
+  const input = editor.element("previewTextInput");
+  input.value = "ABCDEFG";
+  input.dispatch("input");
+  const glyphs = editor.textDraws.slice(-7);
+  assert.equal(glyphs.map((draw) => draw.text).join(""), "ABCDEFG");
+  assert.ok(glyphs[0].y < glyphs[1].y);
+  assert.ok(glyphs[2].x < glyphs[0].x);
+  assert.ok(glyphs[4].x < glyphs[2].x);
+});
+
+test("vertical alignment changes glyph position without losing horizontal alignment", async () => {
+  const editor = createEditor();
+  editor.element("alignControl").dispatch("click", {
+    target: { closest: () => ({ dataset: { value: "right" } }) },
+  });
+  editor.element("alignmentModeBtn").dispatch("click");
+  const firstY = editor.textDraws.at(-12).y;
+  editor.element("valignControl").dispatch("click", {
+    target: { closest: () => ({ dataset: { value: "bottom" } }) },
+  });
+  assert.ok(editor.textDraws.at(-12).y > firstY);
+  assert.equal(editor.evaluate("textAlign"), "right");
+  assert.equal(editor.evaluate("textValign"), "bottom");
+  editor.element("templateNameInput").value = "aligned";
+  editor.setImageDataUrl("data:image/png;base64,AA==");
+  await editor.element("saveBtn").dispatch("click");
+  assert.equal(editor.saved[0].align, "right");
+  assert.equal(editor.saved[0].valign, "bottom");
+  editor.element("alignmentModeBtn").dispatch("click");
+  assert.equal(editor.evaluate("textAlign"), "right");
+  assert.equal(editor.evaluate("textValign"), "bottom");
+});
+
+test("existing vertical templates restore their alignment mode", async () => {
+  const editor = createEditor({
+    templates: {
+      saved: {
+        background: "data:image/png;base64,AA==",
+        layer: {
+          x: 100, y: 50, w: 80, h: 300, fontsize: 40,
+          align: "right", valign: "bottom", orientation: "vertical",
+        },
+      },
+    },
+    user_templates: ["saved"],
+    current: "saved",
+  });
+  await new Promise(setImmediate);
+  assert.equal(editor.evaluate("orientation"), "vertical");
+  assert.equal(editor.element("valignControl").hidden, false);
+  assert.equal(editor.element("alignControl").hidden, true);
+  assert.equal(editor.evaluate("textAlign"), "right");
+  assert.equal(editor.evaluate("textValign"), "bottom");
 });
 
 test("zoom changes displayed size and percentage without changing template coordinates", () => {
@@ -654,6 +745,63 @@ test("top and bottom edges have no resize handles", () => {
   const x = box.x + box.w / 2;
   assert.equal(editor.evaluate(`handleAt({ x: ${x}, y: ${box.y} })`), "");
   assert.equal(editor.evaluate(`handleAt({ x: ${x}, y: ${box.y + box.h} })`), "");
+});
+
+test("vertical text moves the side handles to the top and bottom", () => {
+  const editor = createEditor();
+  editor.evaluate('orientation = "vertical"; rect = { x: 300, y: 160, w: 172.8, h: 240 }; draw()');
+  const box = editor.state();
+  const centerX = box.x + box.w / 2;
+  const centerY = box.y + box.h / 2;
+  assert.equal(editor.element("selectionBox").classList.contains("vertical"), true);
+  assert.equal(editor.evaluate(`handleAt({ x: ${centerX}, y: ${box.y} })`), "top");
+  assert.equal(editor.evaluate(`handleAt({ x: ${centerX}, y: ${box.y + box.h} })`), "bottom");
+  assert.equal(editor.evaluate(`handleAt({ x: ${box.x}, y: ${centerY} })`), "");
+  assert.equal(editor.evaluate(`handleAt({ x: ${box.x + box.w}, y: ${centerY} })`), "");
+  editor.pointer("pointermove", centerX, box.y);
+  assert.equal(editor.canvasWrap.style.cursor, "ns-resize");
+
+  editor.pointer("pointerdown", centerX, box.y);
+  editor.pointer("pointermove", centerX, box.y + 20);
+  editor.pointer("pointerup", centerX, box.y + 20);
+  const after = editor.state();
+  assert.equal(after.h, 220);
+  assert.ok(after.w > box.w);
+  assert.ok(Math.abs(after.y + after.h - box.y - box.h) < 1e-8);
+  assert.equal(after.fontSize, box.fontSize);
+});
+
+test("vertical bottom handle resizes downward and wraps into fewer columns", () => {
+  const editor = createEditor();
+  editor.evaluate('orientation = "vertical"; rect = { x: 300, y: 160, w: 172.8, h: 240 }; draw()');
+  const before = editor.state();
+  const centerX = before.x + before.w / 2;
+  editor.pointer("pointerdown", centerX, before.y + before.h);
+  editor.pointer("pointermove", centerX, before.y + before.h + 110);
+  editor.pointer("pointerup", centerX, before.y + before.h + 110);
+  const after = editor.state();
+  assert.equal(after.h, 350);
+  assert.ok(after.w < before.w);
+  assert.equal(after.y, before.y);
+  assert.equal(after.fontSize, before.fontSize);
+});
+
+test("rotated vertical handles follow the box axis", () => {
+  const editor = createEditor();
+  editor.evaluate('orientation = "vertical"; rect = { x: 300, y: 160, w: 172.8, h: 240 }; rotation = 90; draw()');
+  const before = editor.state();
+  const centerX = before.x + before.w / 2;
+  const centerY = before.y + before.h / 2;
+  const topX = centerX + before.h / 2;
+  assert.equal(editor.evaluate(`handleAt({ x: ${topX}, y: ${centerY} })`), "top");
+  editor.pointer("pointermove", topX, centerY);
+  assert.equal(editor.canvasWrap.style.cursor, "ew-resize");
+  editor.pointer("pointerdown", topX, centerY);
+  editor.pointer("pointermove", topX + 20, centerY);
+  editor.pointer("pointerup", topX + 20, centerY);
+  const after = editor.state();
+  assert.ok(after.h > before.h);
+  assert.equal(after.rotation, 90);
 });
 
 test("narrowing either side wraps text without changing glyph size", () => {

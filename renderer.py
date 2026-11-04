@@ -107,6 +107,51 @@ class TemplateRenderer:
             return
 
         font = self._load_font(layer)
+        try:
+            fill = ImageColor.getrgb(layer.color)
+        except ValueError as err:
+            raise RenderError(f"Layer {layer.id} color is invalid.") from err
+
+        if layer.orientation == "vertical":
+            cell_size = max(1, round(layer.fontsize * 1.2))
+            rows_per_column = max(1, layer.h // cell_size)
+            columns = [
+                paragraph[start : start + rows_per_column]
+                for paragraph in text.splitlines()
+                for start in range(0, max(1, len(paragraph)), rows_per_column)
+            ]
+            first_x = layer.x + (layer.w + len(columns) * cell_size) / 2 - cell_size
+            for column_index, column in enumerate(columns):
+                spare_height = max(0, layer.h - len(column) * cell_size)
+                offset_y = (
+                    spare_height / 2
+                    if layer.valign == "middle"
+                    else spare_height
+                    if layer.valign == "bottom"
+                    else 0
+                )
+                for row, character in enumerate(column):
+                    box = draw.textbbox((0, 0), character, font=font)
+                    glyph_width = box[2] - box[0]
+                    glyph_height = box[3] - box[1]
+                    draw.text(
+                        (
+                            first_x
+                            - column_index * cell_size
+                            + (cell_size - glyph_width) / 2
+                            - box[0],
+                            layer.y
+                            + offset_y
+                            + row * cell_size
+                            + (cell_size - glyph_height) / 2
+                            - box[1],
+                        ),
+                        character,
+                        font=font,
+                        fill=fill,
+                    )
+            return
+
         lines = self._wrap_text(draw, text, font, layer.w)
         boxes = [draw.textbbox((0, 0), line or " ", font=font) for line in lines]
         line_height = max(1, round(layer.fontsize * 1.2))
@@ -120,10 +165,6 @@ class TemplateRenderer:
         else:
             offset_y = 0
 
-        try:
-            fill = ImageColor.getrgb(layer.color)
-        except ValueError as err:
-            raise RenderError(f"Layer {layer.id} color is invalid.") from err
         for index, (line, box) in enumerate(zip(lines, boxes)):
             text_width = box[2] - box[0]
             if layer.align == "center":
@@ -147,6 +188,7 @@ class TemplateRenderer:
         width: int,
     ) -> list[str]:
         """Wrap words when possible and split oversized tokens by character."""
+
         def measure(value: str) -> int:
             bounds = draw.textbbox((0, 0), value, font=font)
             return bounds[2] - bounds[0]

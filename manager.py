@@ -294,6 +294,7 @@ class TemplateManager:
             "rotation",
             "align",
             "valign",
+            "orientation",
             "color",
             "required",
             "default",
@@ -379,10 +380,13 @@ class TemplateManager:
 
         align = str(raw.get("align") or "left")
         valign = str(raw.get("valign") or "top")
+        orientation = str(raw.get("orientation") or "horizontal")
         if align not in {"left", "center", "right"}:
             raise TemplateConfigError(f"Layer {layer_id} align is invalid.")
         if valign not in {"top", "middle", "bottom"}:
             raise TemplateConfigError(f"Layer {layer_id} valign is invalid.")
+        if orientation not in {"horizontal", "vertical"}:
+            raise TemplateConfigError(f"Layer {layer_id} orientation is invalid.")
 
         font = raw.get("font")
         if font is not None and not isinstance(font, str):
@@ -402,6 +406,7 @@ class TemplateManager:
             rotation=self._int(raw.get("rotation", 0), f"{layer_id}.rotation"),
             align=align,
             valign=valign,
+            orientation=orientation,
             color=str(raw.get("color") or "#000000"),
             required=self._bool(raw.get("required", True), f"{layer_id}.required"),
             default=str(raw.get("default") or ""),
@@ -438,6 +443,7 @@ class TemplateManager:
             "rotation": options.get("rotation", "0"),
             "align": options.get("align", "center"),
             "valign": options.get("valign", "middle"),
+            "orientation": options.get("orientation", "horizontal"),
             "color": options.get("color", "#000000"),
             "required": options.get("required", True),
             "default": options.get("default", ""),
@@ -467,6 +473,7 @@ class TemplateManager:
             "rotation": layer.rotation,
             "align": layer.align,
             "valign": layer.valign,
+            "orientation": layer.orientation,
             "color": layer.color,
             "required": layer.required,
             "default": layer.default,
