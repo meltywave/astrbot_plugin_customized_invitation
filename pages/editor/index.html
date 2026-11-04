@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>邀请函模版编辑器</title>
+    <title>模版编辑</title>
     <style>
       :root {
         color-scheme: light;
@@ -36,58 +36,92 @@
       }
 
       .shell {
-        min-height: 100vh;
+        height: 100vh;
+        overflow: hidden;
       }
 
       .stage {
         display: grid;
-        grid-template-rows: auto auto minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr) 18px;
         min-width: 0;
-        min-height: 100vh;
+        height: 100%;
+        min-height: 0;
       }
 
-      .topbar {
+      .editor-header {
+        position: sticky;
+        top: 0;
+        z-index: 3;
+        min-width: 0;
         background: var(--panel);
       }
 
       .topbar {
-        position: relative;
-        z-index: 1;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 16px;
-        min-height: 64px;
-        padding: 12px 18px;
+        flex-wrap: nowrap;
+        gap: 12px 20px;
+        height: 88px;
+        padding: 8px 18px;
         border-bottom: 1px solid var(--line);
+        overflow-x: auto;
+        overflow-y: hidden;
       }
 
-      h1 {
+      .topbar-title {
+        flex: none;
+      }
+
+      .topbar h1 {
         margin: 0;
         font-size: 18px;
         font-weight: 650;
         letter-spacing: 0;
+        white-space: nowrap;
       }
 
-      .template-name {
-        color: var(--muted);
-        font-size: 13px;
+      .topbar-controls {
+        display: flex;
+        align-items: flex-end;
+        flex-wrap: nowrap;
+        gap: 10px 18px;
+        min-width: 0;
+        flex: none;
+      }
+
+      #saveBtn {
+        flex: none;
       }
 
       .canvas-wrap {
-        display: grid;
-        place-items: center;
+        display: flex;
+        align-items: safe center;
+        justify-content: safe center;
         min-width: 0;
-        min-height: 300px;
+        min-height: 0;
         padding: clamp(24px, 5vw, 60px);
-        overflow: hidden;
+        overflow-x: hidden;
+        overflow-y: auto;
         touch-action: none;
+      }
+
+      .horizontal-scroll {
+        min-width: 0;
+        height: 18px;
+        overflow-x: scroll;
+        overflow-y: hidden;
+        background: var(--bg);
+      }
+
+      .horizontal-scroll-content {
+        height: 1px;
       }
 
       .editor-surface {
         position: relative;
-        width: 960px;
-        max-width: 100%;
+        flex: none;
+        width: min(960px, calc(100vw - 48px));
       }
 
       canvas {
@@ -180,15 +214,16 @@
       .selection-toolbar {
         display: flex;
         align-items: flex-end;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
         gap: 10px 18px;
         margin: 12px 18px 0;
-        padding: 12px 14px;
+        padding: 8px 14px;
         border: 1px solid var(--line);
         border-radius: 8px;
         background: var(--panel);
-        max-height: 180px;
-        overflow: auto;
+        height: 88px;
+        overflow-x: auto;
+        overflow-y: hidden;
         visibility: hidden;
         pointer-events: none;
       }
@@ -205,9 +240,10 @@
       .group {
         display: flex;
         align-items: flex-end;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
         gap: 8px;
         min-width: 0;
+        flex: none;
       }
 
       .group-title {
@@ -303,6 +339,39 @@
         min-width: 0;
       }
 
+      .preview-field {
+        width: 180px;
+      }
+
+      .zoom-control {
+        position: fixed;
+        z-index: 2;
+        right: 18px;
+        bottom: 18px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        box-shadow: 0 2px 8px rgba(32, 38, 45, 0.12);
+      }
+
+      .zoom-control input {
+        width: 130px;
+        min-height: 0;
+        padding: 0;
+        accent-color: var(--accent);
+      }
+
+      .zoom-control output {
+        min-width: 38px;
+        color: var(--text);
+        font-size: 12px;
+        text-align: right;
+      }
+
       .icon-control {
         display: grid;
         gap: 6px;
@@ -371,10 +440,10 @@
       }
 
       .status {
-        flex-basis: 100%;
         color: var(--muted);
         font-size: 13px;
         line-height: 1.45;
+        white-space: nowrap;
       }
 
       .status:empty {
@@ -390,14 +459,19 @@
       }
 
       @media (max-width: 600px) {
+        .topbar {
+          padding: 8px 12px;
+        }
+
         .selection-toolbar {
           margin: 10px 12px 0;
-          padding: 10px;
+          padding: 8px;
           gap: 10px;
         }
 
-        .group {
-          width: 100%;
+        .zoom-control {
+          right: 12px;
+          bottom: 12px;
         }
       }
     </style>
@@ -405,42 +479,47 @@
   <body>
     <main class="shell">
       <section class="stage">
+        <div class="editor-header">
         <header class="topbar">
-          <div>
-            <h1>邀请函模版编辑器</h1>
-            <div class="template-name" id="templateName"></div>
+          <div class="topbar-title">
+            <h1 id="templateName"></h1>
+            <div id="status" class="status"></div>
+          </div>
+          <div class="topbar-controls">
+            <section class="group">
+              <p class="group-title">模版</p>
+              <div class="mode-switch" role="tablist" aria-label="模版操作">
+                <button id="newTemplateBtn" class="mode-button active" type="button">新增模版</button>
+                <button id="existingTemplateBtn" class="mode-button" type="button">选择已有</button>
+              </div>
+              <label id="templateSelectLabel" class="template-picker" hidden>
+                已上传模版
+                <select id="templateSelect">
+                  <option value="">请选择模版</option>
+                </select>
+              </label>
+              <label class="template-name-field">
+                模版名称
+                <input id="templateNameInput" type="text" maxlength="64" />
+              </label>
+            </section>
+            <section class="group">
+              <p class="group-title">图片</p>
+              <label class="image-field">
+                模版图片
+                <input id="imageInput" type="file" accept="image/*" />
+              </label>
+            </section>
           </div>
           <button id="saveBtn" type="button" disabled>保存</button>
         </header>
         <div class="selection-toolbar" id="selectionToolbar" role="toolbar" aria-label="选中文本框工具栏" aria-hidden="true">
         <section class="group">
-          <p class="group-title">模版</p>
-          <div class="mode-switch" role="tablist" aria-label="模版操作">
-            <button id="newTemplateBtn" class="mode-button active" type="button">新增模版</button>
-            <button id="existingTemplateBtn" class="mode-button" type="button">选择已有</button>
-          </div>
-          <label id="templateSelectLabel" class="template-picker" hidden>
-            已上传模版
-            <select id="templateSelect">
-              <option value="">请选择模版</option>
-            </select>
-          </label>
-          <label class="template-name-field">
-            模版名称
-            <input id="templateNameInput" type="text" maxlength="64" />
-          </label>
-        </section>
-
-        <section class="group">
-          <p class="group-title">图片</p>
-          <label class="image-field">
-            模版图片
-            <input id="imageInput" type="file" accept="image/*" />
-          </label>
-        </section>
-
-        <section class="group">
           <p class="group-title">文字样式</p>
+          <label class="preview-field">
+            文本预填
+            <input id="previewTextInput" type="text" value="Name preview" />
+          </label>
           <div class="grid2">
             <label class="font-size-field">
               字号
@@ -517,8 +596,7 @@
             </div>
           </div>
         </section>
-
-        <div id="status" class="status"></div>
+        </div>
         </div>
         <div class="canvas-wrap">
           <div class="editor-surface" id="editorSurface">
@@ -536,6 +614,14 @@
             <span class="rotation-angle" id="rotationAngle"></span>
           </div>
         </div>
+        <div class="horizontal-scroll" id="horizontalScroll" aria-label="画布水平滚动">
+          <div class="horizontal-scroll-content" id="horizontalScrollContent"></div>
+        </div>
+        <label class="zoom-control">
+          缩放
+          <input id="zoomInput" type="range" min="25" max="200" step="5" value="100" />
+          <output id="zoomValue" for="zoomInput">100%</output>
+        </label>
       </section>
     </main>
 
@@ -558,6 +644,8 @@
 
       const canvas = document.getElementById("canvas");
       const canvasWrap = document.querySelector(".canvas-wrap");
+      const horizontalScroll = document.getElementById("horizontalScroll");
+      const horizontalScrollContent = document.getElementById("horizontalScrollContent");
       const selectionToolbar = document.getElementById("selectionToolbar");
       const editorSurface = document.getElementById("editorSurface");
       const selectionBox = document.getElementById("selectionBox");
@@ -571,6 +659,9 @@
       const templateSelectLabel = document.getElementById("templateSelectLabel");
       const templateNameEl = document.getElementById("templateName");
       const templateNameInput = document.getElementById("templateNameInput");
+      const previewTextInput = document.getElementById("previewTextInput");
+      const zoomInput = document.getElementById("zoomInput");
+      const zoomValue = document.getElementById("zoomValue");
       const newTemplateBtn = document.getElementById("newTemplateBtn");
       const existingTemplateBtn = document.getElementById("existingTemplateBtn");
       const alignControl = document.getElementById("alignControl");
@@ -623,6 +714,8 @@
       let imageFile = null;
       let bitmap = null;
       let scale = 1;
+      let zoom = 1;
+      let baseDisplayWidth = canvas.clientWidth;
       let rect = { x: 96, y: 220, w: 768, h: 96 };
       let fontSize = 48;
       let rotation = 0;
@@ -634,8 +727,6 @@
       let templateMode = "new";
       let currentImageDataUrl = "";
       let templateDetails = {};
-      const previewText = "Name preview";
-
       function setStatus(text, kind) {
         statusEl.textContent = text || "";
         statusEl.className = `status ${kind || ""}`.trim();
@@ -646,9 +737,7 @@
       }
 
       function updateTemplateTitle() {
-        templateNameEl.textContent = currentTemplateName()
-          ? currentTemplateName()
-          : "Unnamed template";
+        templateNameEl.textContent = currentTemplateName() || "未命名模版";
       }
 
       function currentFontOption() {
@@ -709,6 +798,7 @@
       function textSize(size = fontSize, width = rect.w) {
         ctx.save();
         ctx.font = `${size * scale}px ${currentFontOption().css}`;
+        const previewText = previewTextInput.value;
         const metrics = ctx.measureText(previewText);
         const lines = wrapText(
           previewText,
@@ -751,6 +841,7 @@
         const bounds = imageBounds();
         const unitX = canvas.clientWidth / bounds.width;
         const unitY = canvas.clientHeight / bounds.height;
+        const padding = Math.min(60, Math.max(24, window.innerWidth * 0.05));
         const radians = (angle * Math.PI) / 180;
         const extentX = (Math.abs(Math.cos(radians)) * candidate.w +
           Math.abs(Math.sin(radians)) * candidate.h) / 2;
@@ -758,10 +849,10 @@
           Math.abs(Math.cos(radians)) * candidate.h) / 2;
         const centerX = candidate.x + candidate.w / 2;
         const centerY = candidate.y + candidate.h / 2;
-        const left = (wrap.left - image.left - canvas.clientLeft) / unitX;
-        const right = (wrap.right - image.left - canvas.clientLeft) / unitX;
-        const top = (wrap.top - image.top - canvas.clientTop) / unitY;
-        const bottom = (wrap.bottom - image.top - canvas.clientTop) / unitY;
+        const left = (Math.min(wrap.left, image.left - padding) - image.left - canvas.clientLeft) / unitX;
+        const right = (Math.max(wrap.right, image.right + padding) - image.left - canvas.clientLeft) / unitX;
+        const top = (Math.min(wrap.top, image.top - padding) - image.top - canvas.clientTop) / unitY;
+        const bottom = (Math.max(wrap.bottom, image.bottom + padding) - image.top - canvas.clientTop) / unitY;
         return {
           left, right, top, bottom, extentX, extentY,
           fits: centerX - extentX >= left - 1e-8 &&
@@ -803,12 +894,13 @@
 
       function fitCanvas(width, height) {
         const padding = Math.min(60, Math.max(24, window.innerWidth * 0.05));
-        const maxWidth = Math.max(1, window.innerWidth - padding * 2);
-        const maxHeight = Math.max(1, window.innerHeight - 104 - selectionToolbar.offsetHeight - padding * 2);
+        const maxWidth = Math.max(1, canvasWrap.clientWidth - padding * 2);
+        const maxHeight = Math.max(1, canvasWrap.clientHeight - padding * 2);
         scale = Math.min(maxWidth / width, maxHeight / height, 1);
         canvas.width = Math.round(width * scale);
         canvas.height = Math.round(height * scale);
-        editorSurface.style.width = `${canvas.width}px`;
+        baseDisplayWidth = canvas.width;
+        editorSurface.style.width = `${baseDisplayWidth * zoom}px`;
       }
 
       function drawTextPreview() {
@@ -903,6 +995,8 @@
           rotationAngle.style.left = `calc(${((rect.x + rect.w / 2) / bounds.width) * 100}% + ${handle.x + 16}px)`;
           rotationAngle.style.top = `calc(${((rect.y + rect.h / 2) / bounds.height) * 100}% + ${handle.y}px)`;
         }
+        horizontalScroll.style.width = `${canvasWrap.clientWidth}px`;
+        horizontalScrollContent.style.width = `${canvasWrap.scrollWidth}px`;
       }
 
       function canvasPoint(event) {
@@ -1198,6 +1292,23 @@
       inputs.font.addEventListener("change", () => {
         fitTextHeight();
         draw();
+      });
+      previewTextInput.addEventListener("input", () => {
+        fitTextHeight();
+        draw();
+      });
+      zoomInput.addEventListener("input", () => {
+        zoom = Number(zoomInput.value) / 100;
+        zoomValue.textContent = `${zoomInput.value}%`;
+        editorSurface.style.width = `${baseDisplayWidth * zoom}px`;
+        horizontalScroll.style.width = `${canvasWrap.clientWidth}px`;
+        horizontalScrollContent.style.width = `${canvasWrap.scrollWidth}px`;
+      });
+      canvasWrap.addEventListener("scroll", () => {
+        horizontalScroll.scrollLeft = canvasWrap.scrollLeft;
+      });
+      horizontalScroll.addEventListener("scroll", () => {
+        canvasWrap.scrollLeft = horizontalScroll.scrollLeft;
       });
 
       function rectFromAnchor(start, anchorX, anchorY, width, height) {

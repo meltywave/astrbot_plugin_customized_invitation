@@ -49,7 +49,7 @@ function createEditor(templateData = { templates: {} }) {
       const attributes = new Map();
       elements.set(id, {
         id,
-        value: id === "fontSizeInput" ? "48" : "",
+        value: id === "fontSizeInput" ? "48" : id === "previewTextInput" ? "Name preview" : id === "zoomInput" ? "100" : "",
         style: {},
         offsetHeight: id === "selectionToolbar" ? 100 : 0,
         classList: {
@@ -99,6 +99,10 @@ function createEditor(templateData = { templates: {} }) {
   });
   Object.assign(canvasWrap, {
     bounds: { left: -60, top: -160, right: 1020, bottom: 700 },
+    clientWidth: 1080,
+    clientHeight: 680,
+    scrollWidth: 1080,
+    scrollLeft: 0,
     getBoundingClientRect() {
       return this.bounds;
     },
@@ -200,6 +204,15 @@ test("outside drag leaves the text box in place", () => {
 
 test("toolbar is below the title and appears only while the frame is selected", () => {
   assert.match(html, /<header class="topbar">[\s\S]*?<\/header>\s*<div class="selection-toolbar"[\s\S]*?<div class="canvas-wrap">/);
+  assert.match(html, /<div class="editor-header">\s*<header class="topbar">/);
+  assert.match(html, /\.editor-header\s*\{[^}]*position: sticky;[^}]*top: 0;/);
+  assert.match(html, /\.topbar\s*\{[^}]*flex-wrap: nowrap;[^}]*height: 88px;[^}]*overflow-x: auto;/);
+  assert.match(html, /\.selection-toolbar\s*\{[^}]*flex-wrap: nowrap;[^}]*height: 88px;[^}]*overflow-x: auto;/);
+  assert.match(html, /<h1 id="templateName"><\/h1>/);
+  assert.doesNotMatch(html, /邀请函模版编辑器/);
+  const toolbarMarkup = html.match(/<div class="selection-toolbar"[\s\S]*?<div class="canvas-wrap">/)?.[0];
+  assert.doesNotMatch(toolbarMarkup, /id="(?:newTemplateBtn|existingTemplateBtn|imageInput)"/);
+  assert.match(toolbarMarkup, /id="previewTextInput"/);
   assert.doesNotMatch(html, /<aside class="side">/);
   const editor = createEditor();
   const toolbar = editor.element("selectionToolbar");
@@ -214,6 +227,122 @@ test("toolbar is below the title and appears only while the frame is selected", 
   editor.pointer("pointerdown", 20, 20);
   assert.equal(toolbar.classList.contains("visible"), false);
   assert.equal(toolbar.inert, true);
+});
+
+test("template name is shown as the title and stays editable above the selection toolbar", () => {
+  const editor = createEditor();
+  assert.equal(editor.element("templateName").textContent, "未命名模版");
+  editor.element("templateNameInput").value = "Spring invitation";
+  editor.element("templateNameInput").dispatch("input");
+  assert.equal(editor.element("templateName").textContent, "Spring invitation");
+  assert.match(html, /<header class="topbar">[\s\S]*?id="newTemplateBtn"[\s\S]*?id="imageInput"[\s\S]*?<\/header>/);
+});
+
+test("prefill text replaces the canvas preview as it is typed", () => {
+  const editor = createEditor();
+  const preview = editor.element("previewTextInput");
+  assert.equal(editor.textDraws.at(-1).text, "Name preview");
+  preview.value = "Guest name";
+  preview.dispatch("input");
+  assert.equal(editor.textDraws.at(-1).text, "Guest name");
+  assert.equal(editor.state().h, editor.evaluate("textSize().h"));
+  preview.value = "";
+  preview.dispatch("input");
+  assert.equal(editor.textDraws.at(-1).text, "");
+});
+
+test("zoom changes displayed size and percentage without changing template coordinates", () => {
+  const editor = createEditor();
+  const before = editor.state();
+  const zoomInput = editor.element("zoomInput");
+  zoomInput.value = "150";
+  zoomInput.dispatch("input");
+  assert.equal(editor.element("zoomValue").textContent, "150%");
+  assert.equal(editor.element("editorSurface").style.width, "1440px");
+  assert.deepEqual(editor.state(), before);
+  zoomInput.value = "50";
+  zoomInput.dispatch("input");
+  assert.equal(editor.element("zoomValue").textContent, "50%");
+  assert.equal(editor.element("editorSurface").style.width, "480px");
+});
+
+test("pointer dragging uses displayed canvas coordinates after zoom", () => {
+  const editor = createEditor();
+  editor.element("zoomInput").value = "50";
+  editor.element("zoomInput").dispatch("input");
+  editor.canvas.clientWidth = 480;
+  editor.canvas.clientHeight = 270;
+  const before = editor.state();
+  editor.pointer("pointerdown", 240, 134);
+  editor.pointer("pointermove", 255, 144);
+  editor.pointer("pointerup", 255, 144);
+  assert.equal(editor.state().x, before.x + 30);
+  assert.equal(editor.state().y, before.y + 20);
+});
+
+test("mouse dragging works at 200% after scrolling both axes", () => {
+  const editor = createEditor();
+  editor.element("zoomInput").value = "200";
+  editor.element("zoomInput").dispatch("input");
+  editor.canvas.clientWidth = 1920;
+  editor.canvas.clientHeight = 1080;
+  editor.canvas.getBoundingClientRect = () => ({
+    left: -400, top: -100, right: 1520, bottom: 980,
+  });
+  const before = editor.state();
+  editor.pointer("pointerdown", 560, 436);
+  editor.pointer("pointermove", 580, 446);
+  editor.pointer("pointerup", 580, 446);
+  assert.equal(editor.state().x, before.x + 10);
+  assert.equal(editor.state().y, before.y + 5);
+});
+
+test("the horizontal scrollbar stays below the canvas viewport", () => {
+  assert.match(html, /\.shell\s*\{[^}]*height: 100vh;[^}]*overflow: hidden;/);
+  assert.match(html, /\.stage\s*\{[^}]*grid-template-rows: auto minmax\(0, 1fr\) 18px;/);
+  assert.match(html, /\.canvas-wrap\s*\{[^}]*min-height: 0;[^}]*overflow-x: hidden;[^}]*overflow-y: auto;/);
+  assert.match(html, /\.horizontal-scroll\s*\{[^}]*overflow-x: scroll;/);
+  assert.match(html, /<div class="canvas-wrap">[\s\S]*?<\/div>\s*<div class="horizontal-scroll"/);
+  assert.match(html, /\.editor-surface\s*\{[^}]*flex: none;/);
+});
+
+test("the fixed horizontal scrollbar follows zoom and scrolls the canvas", () => {
+  const editor = createEditor();
+  const track = editor.element("horizontalScroll");
+  const content = editor.element("horizontalScrollContent");
+  editor.canvasWrap.clientWidth = 1065;
+  editor.canvasWrap.scrollWidth = 2050;
+  editor.element("zoomInput").value = "200";
+  editor.element("zoomInput").dispatch("input");
+  assert.equal(track.style.width, "1065px");
+  assert.equal(content.style.width, "2050px");
+
+  track.scrollLeft = 320;
+  track.dispatch("scroll");
+  assert.equal(editor.canvasWrap.scrollLeft, 320);
+  editor.canvasWrap.scrollLeft = 110;
+  editor.canvasWrap.dispatch("scroll");
+  assert.equal(track.scrollLeft, 110);
+});
+
+test("zoom remains a display-only setting after loading an image", async () => {
+  const editor = createEditor();
+  editor.element("zoomInput").value = "150";
+  editor.element("zoomInput").dispatch("input");
+  editor.element("imageInput").files = [{}];
+  await editor.element("imageInput").dispatch("change");
+  assert.equal(editor.element("editorSurface").style.width, `${editor.canvas.width * 1.5}px`);
+  assert.equal(editor.element("zoomValue").textContent, "150%");
+});
+
+test("image fitting uses the space below the fixed header", async () => {
+  const editor = createEditor();
+  editor.canvasWrap.clientWidth = 800;
+  editor.canvasWrap.clientHeight = 500;
+  editor.element("imageInput").files = [{}];
+  await editor.element("imageInput").dispatch("change");
+  assert.ok(editor.canvas.width <= 680);
+  assert.ok(editor.canvas.height <= 380);
 });
 
 test("uploading an image keeps the selected toolbar open", async () => {
