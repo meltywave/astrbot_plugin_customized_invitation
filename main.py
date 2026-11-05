@@ -132,9 +132,9 @@ class CustomizedInvitationPlugin(Star):
         """
         try:
             owner_key = self._owner_key(event)
-            template_name = self.state.get_active_template(owner_key)
+            template_name = self.state.get_effective_template(owner_key)
             if not template_name:
-                yield event.plain_result("请先使用 /设置模版 名称 选定当前模版。")
+                yield event.plain_result("当前无启用模版。")
                 return
 
             request_data = parse_invitation_fields(
@@ -283,10 +283,12 @@ class CustomizedInvitationPlugin(Star):
             return error_response("Upload task is invalid or expired.", status_code=404)
         action = str(body.get("action") or "")
         template_id = str(body.get("template") or "").strip()
-        active_id = str(body.get("active_template") or template_id).strip()
+        active_id = str(body.get("active_template", template_id) or "").strip()
         display_name = str(body.get("display_name") or "").strip()
-        if action not in {"create", "update", "bind"}:
+        if action not in {"create", "update", "bind", "delete"}:
             return error_response("Invalid template action.", status_code=400)
+        if action == "delete":
+            return await self.delete_editor_template(body)
 
         preview_bytes = None
         preview_data = body.get("preview")
@@ -328,7 +330,7 @@ class CustomizedInvitationPlugin(Star):
                     if task
                     else self.manager.load(template_id)
                 )
-                if active_id != template_id:
+                if active_id and active_id != template_id:
                     if task:
                         self.manager.load_for_user(str(task["owner_key"]), active_id)
                     else:
@@ -360,6 +362,30 @@ class CustomizedInvitationPlugin(Star):
             )
         except (TemplateConfigError, OSError, ValueError) as err:
             return error_response(str(err), status_code=400)
+
+    async def delete_editor_template(self, body: dict):
+        """Delete a template and clear its active and upload-task bindings.
+
+        Args:
+            body: Template deletion request payload.
+
+        Returns:
+            JSON response with the deleted template identifier.
+        """
+        task_token = str(body.get("task") or "").strip()
+        task = self.state.get_upload_task(task_token) if task_token else None
+        if task_token and not task:
+            return error_response("Upload task is invalid or expired.", status_code=404)
+        template_name = str(body.get("template") or "").strip()
+        if not template_name:
+            return error_response("Please select a template.", status_code=400)
+        owner_key = str(task["owner_key"]) if task else None
+        try:
+            self.manager.delete_template(template_name, owner_key)
+            self.state.clear_template_references(template_name, owner_key)
+        except TemplateConfigError as err:
+            return error_response(str(err), status_code=400)
+        return json_response({"status": "ok", "deleted": template_name})
 
     async def save_editor_template(self):
         """Save template data submitted from the plugin editor page.

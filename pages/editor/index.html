@@ -182,8 +182,38 @@
 
       .drawer-header { border-bottom: 1px solid var(--line); }
       .drawer-header h2 { margin: 0; font-size: 17px; }
-      .drawer-footer { justify-content: flex-end; border-top: 1px solid var(--line); }
+      .drawer-footer { justify-content: space-between; border-top: 1px solid var(--line); }
       .drawer-footer button { padding: 0 16px; }
+
+      .drawer-delete-btn {
+        background: #fbe9e7;
+        color: var(--danger);
+      }
+
+      .delete-confirm-overlay {
+        position: fixed;
+        z-index: 12;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        padding: 20px;
+        background: rgba(24, 31, 38, 0.48);
+      }
+
+      .delete-confirm-overlay[hidden] { display: none; }
+
+      .delete-confirm-dialog {
+        width: min(100%, 360px);
+        padding: 20px;
+        border-radius: 6px;
+        background: var(--panel);
+      }
+
+      .delete-confirm-dialog h2 { margin: 0 0 10px; font-size: 17px; }
+      .delete-confirm-dialog p { margin: 0; color: var(--muted); font-size: 14px; }
+      .delete-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+      .delete-confirm-actions button { padding: 0 14px; }
+      .confirm-delete-btn { background: var(--danger); }
 
       .drawer-close {
         width: 32px;
@@ -297,6 +327,21 @@
         overflow-y: auto;
         padding: 18px 20px;
         border-top: 1px solid var(--line);
+      }
+
+      .drawer-field {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .drawer-field span {
+        flex: none;
+        width: 64px;
+      }
+
+      .drawer-field input {
+        min-width: 0;
       }
 
       .drawer-preview {
@@ -869,11 +914,10 @@
         <div class="horizontal-scroll" id="horizontalScroll" aria-label="画布水平滚动">
           <div class="horizontal-scroll-content" id="horizontalScrollContent"></div>
         </div>
-        <label class="zoom-control">
-          缩放
-          <input id="zoomInput" type="range" min="25" max="200" step="5" value="100" />
+        <div class="zoom-control">
+          <input id="zoomInput" type="range" min="25" max="200" step="5" value="100" title="缩放" aria-label="缩放" />
           <output id="zoomValue" for="zoomInput">100%</output>
-        </label>
+        </div>
       </section>
     </main>
 
@@ -887,21 +931,33 @@
           <div id="templateGrid" class="template-grid"></div>
         </div>
         <div class="drawer-edit">
-          <label>模版名称<input id="drawerNameInput" type="text" maxlength="64" /></label>
+          <label class="drawer-field"><span>模版名称</span><input id="drawerNameInput" type="text" maxlength="64" /></label>
           <div class="drawer-preview">
             <img id="drawerPreviewImage" alt="模版图片" hidden />
             <span id="drawerPreviewPlaceholder">暂无图片</span>
           </div>
-          <label>图片<input id="drawerPreviewInput" type="file" accept="image/*" /></label>
+          <label class="drawer-field"><span>图片</span><input id="drawerPreviewInput" type="file" accept="image/*" /></label>
           <div id="drawerError" class="drawer-error" role="alert"></div>
         </div>
         <div class="drawer-footer">
-          <button id="drawerCancelBtn" class="cancel-button" type="button">取消</button>
           <span id="drawerConfirmHint" title="请输入模版名称">
             <button id="drawerConfirmBtn" type="button" disabled>保存</button>
           </span>
+          <button id="drawerDeleteBtn" class="drawer-delete-btn" type="button" disabled>删除</button>
         </div>
       </aside>
+    </div>
+
+    <div id="deleteConfirmOverlay" class="delete-confirm-overlay" hidden>
+      <div class="delete-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="deleteConfirmTitle" aria-describedby="deleteConfirmMessage">
+        <h2 id="deleteConfirmTitle">删除模版</h2>
+        <p id="deleteConfirmMessage"></p>
+        <div id="deleteConfirmError" class="drawer-error" role="alert"></div>
+        <div class="delete-confirm-actions">
+          <button id="deleteCancelBtn" class="cancel-button" type="button">取消</button>
+          <button id="deleteConfirmBtn" class="confirm-delete-btn" type="button">删除</button>
+        </div>
+      </div>
     </div>
 
     <script>
@@ -939,8 +995,13 @@
       const drawerOverlay = document.getElementById("drawerOverlay");
       const templateDrawer = document.getElementById("templateDrawer");
       const drawerCloseBtn = document.getElementById("drawerCloseBtn");
-      const drawerCancelBtn = document.getElementById("drawerCancelBtn");
       const drawerConfirmBtn = document.getElementById("drawerConfirmBtn");
+      const drawerDeleteBtn = document.getElementById("drawerDeleteBtn");
+      const deleteConfirmOverlay = document.getElementById("deleteConfirmOverlay");
+      const deleteConfirmMessage = document.getElementById("deleteConfirmMessage");
+      const deleteConfirmError = document.getElementById("deleteConfirmError");
+      const deleteCancelBtn = document.getElementById("deleteCancelBtn");
+      const deleteConfirmBtn = document.getElementById("deleteConfirmBtn");
       const drawerConfirmHint = document.getElementById("drawerConfirmHint");
       const drawerNameInput = document.getElementById("drawerNameInput");
       const drawerPreviewInput = document.getElementById("drawerPreviewInput");
@@ -1734,7 +1795,7 @@
             throw new Error(data.message || "Failed to load templates.");
           }
           templateDetails = data.templates || {};
-          const currentName = data.current || initialTemplateName;
+          const currentName = data.current ?? initialTemplateName;
           boundTemplateId = templateDetails[currentName] ? currentName : "";
           editingTemplateId = templateDetails[preferredTemplateId]
             ? preferredTemplateId : boundTemplateId;
@@ -1783,7 +1844,7 @@
           toggle.setAttribute("aria-checked", String(draftActiveId === name));
           toggle.addEventListener("click", (event) => {
             event.stopPropagation();
-            draftActiveId = name;
+            draftActiveId = draftActiveId === name ? "" : name;
             selectDrawerTemplate(name, true);
           });
           footer.appendChild(toggle);
@@ -1818,6 +1879,7 @@
         drawerPreviewPlaceholder.hidden = Boolean(detail?.preview);
         drawerConfirmBtn.disabled = !drawerNameInput.value.trim();
         drawerConfirmHint.title = drawerConfirmBtn.disabled ? "请输入模版名称" : "";
+        drawerDeleteBtn.disabled = !name;
         renderTemplateCards();
         if (previewCanvas && name && name !== editingTemplateId) {
           selectionPromise = loadTemplateDetail(name).then((loaded) => {
@@ -1869,6 +1931,7 @@
         drawerNameInput.value = "";
         drawerPreviewInput.value = "";
         drawerError.textContent = "";
+        deleteConfirmOverlay.hidden = true;
         templateConfigBtn.focus();
       }
 
@@ -1897,12 +1960,109 @@
           closeDrawer(Boolean(draftTemplateId));
         }
       });
-      drawerCancelBtn.addEventListener("click", () => closeDrawer());
       drawerOverlay.addEventListener("click", (event) => {
         if (event.target === drawerOverlay) return drawerCloseBtn.click();
       });
       window.addEventListener("keydown", (event) => {
-        if (event.key === "Escape" && !drawerOverlay.hidden) closeDrawer();
+        if (event.key !== "Escape") return;
+        if (!deleteConfirmOverlay.hidden) {
+          if (!drawerPending) deleteConfirmOverlay.hidden = true;
+        } else if (!drawerOverlay.hidden) {
+          closeDrawer();
+        }
+      });
+      drawerDeleteBtn.addEventListener("click", () => {
+        if (!draftTemplateId || drawerPending) return;
+        deleteConfirmMessage.textContent = `确定删除「${templateDetails[draftTemplateId]?.display_name || draftTemplateId}」吗？删除后无法恢复。`;
+        deleteConfirmError.textContent = "";
+        deleteConfirmOverlay.hidden = false;
+        deleteCancelBtn.focus();
+      });
+      deleteCancelBtn.addEventListener("click", () => {
+        if (!drawerPending) deleteConfirmOverlay.hidden = true;
+      });
+      deleteConfirmOverlay.addEventListener("click", (event) => {
+        if (event.target === deleteConfirmOverlay && !drawerPending) {
+          deleteConfirmOverlay.hidden = true;
+        }
+      });
+      deleteConfirmBtn.addEventListener("click", async () => {
+        const deletedId = draftTemplateId;
+        if (!deletedId || drawerPending) return;
+        drawerPending = true;
+        deleteConfirmBtn.disabled = true;
+        deleteCancelBtn.disabled = true;
+        drawerDeleteBtn.disabled = true;
+        drawerConfirmBtn.disabled = true;
+        drawerCloseBtn.disabled = true;
+        deleteConfirmError.textContent = "";
+        try {
+          let result;
+          try {
+            result = await pluginApiPost("editor/template-config", {
+              task, action: "delete", template: deletedId,
+            });
+            if (result.status === "error") throw new Error(result.message);
+          } catch (error) {
+            if (error.message !== "Invalid template action.") throw error;
+            try {
+              result = await pluginApiPost("editor/delete-template", {
+                task, template: deletedId,
+              });
+              if (result.status === "error") throw new Error(result.message);
+            } catch (fallbackError) {
+              if (fallbackError.message === "未找到该路由") {
+                throw new Error("删除接口未加载，请重载插件后重试。");
+              }
+              throw fallbackError;
+            }
+          }
+          deleteConfirmOverlay.hidden = true;
+          delete templateDetails[deletedId];
+          if (boundTemplateId === deletedId) boundTemplateId = "";
+          if (editingTemplateId === deletedId) editingTemplateId = "";
+          if (!editingTemplateId && boundTemplateId && templateDetails[boundTemplateId]) {
+            try {
+              if (await loadTemplateDetail(boundTemplateId)) {
+                editingTemplateId = boundTemplateId;
+              }
+            } catch {
+              editingTemplateId = "";
+            }
+          }
+          if (!editingTemplateId) {
+            ++templateLoadSequence;
+            bitmap = null;
+            imageFile = null;
+            currentImageDataUrl = "";
+            backgroundColor = "#ffffff";
+            rect = { x: 96, y: 220, w: 768, h: 96 };
+            fontSize = 48;
+            rotation = 0;
+            selected = false;
+            inputs.fontsize.value = fontSize;
+            draw();
+            resetHistory();
+          }
+          updateSaveState();
+          drawerSession = {
+            editor: editorSnapshot(), bitmap, imageFile, imageDataUrl: currentImageDataUrl,
+            backgroundColor, templateId: editingTemplateId, scale, baseDisplayWidth,
+            canvasWidth: canvas.width, canvasHeight: canvas.height,
+            surfaceWidth: editorSurface.style.width,
+            history: history.slice(), historyIndex, selected,
+          };
+          selectDrawerTemplate(editingTemplateId);
+        } catch (error) {
+          deleteConfirmError.textContent = error.message || "删除模版失败";
+        } finally {
+          drawerPending = false;
+          deleteConfirmBtn.disabled = false;
+          deleteCancelBtn.disabled = false;
+          drawerDeleteBtn.disabled = !draftTemplateId;
+          drawerConfirmBtn.disabled = !drawerNameInput.value.trim();
+          drawerCloseBtn.disabled = false;
+        }
       });
       drawerNameInput.addEventListener("input", () => {
         drawerConfirmBtn.disabled = !drawerNameInput.value.trim();
@@ -1932,17 +2092,17 @@
         drawerPending = true;
         drawerConfirmBtn.disabled = true;
         drawerCloseBtn.disabled = true;
-        drawerCancelBtn.disabled = true;
+        drawerDeleteBtn.disabled = true;
         drawerError.textContent = "";
         try {
           const result = await pluginApiPost("editor/template-config", {
             task, action, template: draftTemplateId,
             display_name: name, preview: draftPreviewData || undefined,
-            active_template: draftActiveId || draftTemplateId,
+            active_template: draftActiveId,
           });
           if (result.status === "error") throw new Error(result.message);
           if (!(await loadTemplates(result.template))) {
-            boundTemplateId = result.active_template || result.template;
+            boundTemplateId = result.active_template ?? result.template;
             editingTemplateId = result.template;
             updateSaveState();
           }
@@ -1953,7 +2113,7 @@
         } finally {
           drawerPending = false;
           drawerCloseBtn.disabled = false;
-          drawerCancelBtn.disabled = false;
+          drawerDeleteBtn.disabled = !draftTemplateId;
           drawerConfirmBtn.disabled = !drawerNameInput.value.trim();
         }
       });

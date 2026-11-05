@@ -145,9 +145,12 @@ function createEditor(
   };
   const saved = [];
   const configRequests = [];
+  const deleteRequests = [];
+  const listRequests = [];
   const scheduledTimers = new Map();
   let nextTimer = 0;
   element("drawerOverlay").hidden = true;
+  element("deleteConfirmOverlay").hidden = true;
   const windowListeners = new Map();
   const window = {
     location: { search: "", hash: "" },
@@ -161,8 +164,18 @@ function createEditor(
     },
     AstrBotPluginPage: {
       ready: async () => {},
-      apiGet: async () => templateData,
+      apiGet: async (endpoint) => {
+        listRequests.push(endpoint);
+        return templateData;
+      },
       apiPost: async (endpoint, payload) => {
+        if ((endpoint === "editor/template-config" && payload.action === "delete") ||
+            endpoint === "editor/delete-template") {
+          deleteRequests.push(payload);
+          delete templateData.templates[payload.template];
+          if (templateData.current === payload.template) templateData.current = "";
+          return { status: "ok", deleted: payload.template };
+        }
         if (endpoint === "editor/template-config") {
           configRequests.push(payload);
           const id = payload.action === "bind" ? payload.template : payload.display_name;
@@ -191,7 +204,7 @@ function createEditor(
           }
           templateData.current = payload.action === "create"
             ? id : payload.active_template === payload.template
-              ? id : payload.active_template || id;
+              ? id : payload.active_template ?? id;
           return { status: "ok", template: id, active_template: templateData.current };
         }
         saved.push(payload);
@@ -270,7 +283,7 @@ function createEditor(
     }
   }
 
-  return { canvas, canvasWrap, configRequests, element, evaluate, flushTimers, keydown, lineDraws, pointer, saved, setImageDataUrl, state, textDraws };
+  return { canvas, canvasWrap, configRequests, deleteRequests, element, evaluate, flushTimers, keydown, lineDraws, listRequests, pointer, saved, setImageDataUrl, state, textDraws };
 }
 
 test("outside drag leaves the text box in place", () => {
@@ -354,22 +367,20 @@ test("drawer lists templates in a two-column grid with the create card last", as
   assert.match(html, /\.drawer-list\s*\{[^}]*overflow-y: auto;/);
 });
 
-test("drawer cancel, close, and overlay discard edits without requests", async () => {
+test("drawer close and overlay discard metadata edits without requests", async () => {
   const editor = createEditor({
     templates: { first: { display_name: "First", preview: "" } }, current: "first",
   });
   await new Promise(setImmediate);
   const button = editor.element("templateConfigBtn");
   const overlay = editor.element("drawerOverlay");
-  for (const close of ["drawerCancelBtn", "drawerCloseBtn"]) {
-    button.dispatch("click");
-    editor.evaluate('selectDrawerTemplate("")');
-    editor.element("drawerNameInput").value = "Draft";
-    await editor.element(close).dispatch("click");
-    assert.equal(overlay.hidden, true);
-    assert.equal(editor.evaluate("boundTemplateId"), "first");
-    assert.equal(editor.configRequests.length, 0);
-  }
+  button.dispatch("click");
+  editor.evaluate('selectDrawerTemplate("")');
+  editor.element("drawerNameInput").value = "Draft";
+  await editor.element("drawerCloseBtn").dispatch("click");
+  assert.equal(overlay.hidden, true);
+  assert.equal(editor.evaluate("boundTemplateId"), "first");
+  assert.equal(editor.configRequests.length, 0);
   button.dispatch("click");
   editor.element("drawerNameInput").value = "Changed";
   await overlay.dispatch("click", { target: overlay });
@@ -405,6 +416,42 @@ test("the template switch enables one card and binds it without updating metadat
   assert.deepEqual(editor.configRequests.map(({ action, template }) => [action, template]), [["bind", "second"]]);
   assert.equal(editor.evaluate("boundTemplateId"), "second");
   assert.equal(editor.element("drawerOverlay").hidden, true);
+});
+
+test("clicking the enabled switch again clears every enabled template", async () => {
+  const editor = createEditor({
+    templates: {
+      first: {
+        display_name: "First", background: "data:image/png;base64,AA==",
+      },
+      second: {
+        display_name: "Second", background: "data:image/png;base64,AA==",
+      },
+    },
+    current: "first",
+  });
+  await new Promise(setImmediate);
+  editor.element("templateConfigBtn").dispatch("click");
+  const firstSwitch = editor.element("templateGrid").children[0].children[1].children[1];
+  firstSwitch.dispatch("click", { stopPropagation() {} });
+  assert.equal(editor.evaluate("draftActiveId"), "");
+  for (const card of editor.element("templateGrid").children.slice(0, 2)) {
+    assert.equal(card.children[1].children[1].getAttribute("aria-checked"), "false");
+  }
+  await editor.element("drawerConfirmBtn").dispatch("click");
+  assert.equal(editor.configRequests[0].active_template, "");
+  assert.equal(editor.evaluate("boundTemplateId"), "");
+  assert.equal(editor.evaluate("currentTemplateName()"), "first");
+  editor.element("templateConfigBtn").dispatch("click");
+  for (const card of editor.element("templateGrid").children.slice(0, 2)) {
+    assert.equal(card.children[1].children[1].getAttribute("aria-checked"), "false");
+  }
+});
+
+test("drawer labels and inputs share a row", () => {
+  assert.match(html, /\.drawer-field\s*\{[^}]*display: flex;[^}]*align-items: center;/);
+  assert.match(html, /class="drawer-field"><span>模版名称<\/span><input id="drawerNameInput"/);
+  assert.match(html, /class="drawer-field"><span>图片<\/span><input id="drawerPreviewInput"/);
 });
 
 test("editing a disabled card does not enable it when saved", async () => {
@@ -481,7 +528,7 @@ test("clicking the overlay keeps the selected card's canvas without saving confi
   assert.equal(editor.configRequests.length, 0);
 });
 
-test("cancel restores unsaved canvas edits after previewing another card", async () => {
+test("Escape restores unsaved canvas edits after previewing another card", async () => {
   const editor = createEditor({
     templates: {
       first: { display_name: "First", background: "data:image/png;base64,AA==",
@@ -501,12 +548,162 @@ test("cancel restores unsaved canvas edits after previewing another card", async
   editor.element("templateConfigBtn").dispatch("click");
   await editor.element("templateGrid").children[1].dispatch("click");
   assert.equal(editor.state().x, 340);
-  editor.element("drawerCancelBtn").dispatch("click");
+  editor.keydown("Escape");
   assert.deepEqual(editor.state(), before);
   assert.equal(editor.evaluate("currentTemplateName()"), "first");
   assert.equal(editor.evaluate("backgroundColor"), "#ffffff");
   assert.equal(editor.element("undoBtn").disabled, false);
   assert.equal(editor.configRequests.length, 0);
+});
+
+test("delete requires confirmation and cancellation leaves the template intact", async () => {
+  const editor = createEditor({
+    templates: {
+      first: { display_name: "First", background: "data:image/png;base64,AA==",
+        layer: { x: 100, y: 100, w: 300, h: 80 } },
+    },
+    current: "first",
+  });
+  await new Promise(setImmediate);
+  editor.element("templateConfigBtn").dispatch("click");
+  assert.equal(editor.element("drawerDeleteBtn").disabled, false);
+  editor.element("drawerDeleteBtn").dispatch("click");
+  assert.equal(editor.element("deleteConfirmOverlay").hidden, false);
+  assert.match(editor.element("deleteConfirmMessage").textContent, /First/);
+  assert.equal(editor.deleteRequests.length, 0);
+  editor.element("deleteCancelBtn").dispatch("click");
+  assert.equal(editor.element("deleteConfirmOverlay").hidden, true);
+  editor.element("drawerDeleteBtn").dispatch("click");
+  editor.keydown("Escape");
+  assert.equal(editor.element("deleteConfirmOverlay").hidden, true);
+  assert.equal(editor.element("templateGrid").children.length, 2);
+  assert.equal(editor.deleteRequests.length, 0);
+  assert.doesNotMatch(html, /id="drawerCancelBtn"/);
+  assert.match(html, /id="drawerConfirmBtn"[^>]*>保存<\/button>[\s\S]*?id="drawerDeleteBtn"[^>]*>删除<\/button>/);
+});
+
+test("delete failure keeps the confirmation open and allows cancellation", async () => {
+  const editor = createEditor({
+    templates: {
+      first: { display_name: "First", background: "data:image/png;base64,AA==",
+        layer: { x: 100, y: 100, w: 300, h: 80 } },
+    },
+    current: "first",
+  });
+  await new Promise(setImmediate);
+  editor.element("templateConfigBtn").dispatch("click");
+  editor.element("drawerDeleteBtn").dispatch("click");
+  editor.evaluate('pluginApiPost = async () => { throw new Error("Delete failed") }');
+  await editor.element("deleteConfirmBtn").dispatch("click");
+  assert.equal(editor.element("deleteConfirmOverlay").hidden, false);
+  assert.equal(editor.element("deleteConfirmError").textContent, "Delete failed");
+  assert.equal(editor.element("deleteConfirmBtn").disabled, false);
+  assert.equal(editor.element("deleteCancelBtn").disabled, false);
+  assert.equal(editor.deleteRequests.length, 0);
+  editor.element("deleteCancelBtn").dispatch("click");
+  assert.equal(editor.element("deleteConfirmOverlay").hidden, true);
+});
+
+test("delete falls back to the previously registered route", async () => {
+  const editor = createEditor({
+    templates: {
+      first: { display_name: "First", background: "data:image/png;base64,AA==",
+        layer: { x: 100, y: 100, w: 300, h: 80 } },
+    },
+    current: "first",
+  });
+  await new Promise(setImmediate);
+  editor.element("templateConfigBtn").dispatch("click");
+  editor.element("drawerDeleteBtn").dispatch("click");
+  editor.evaluate(`pluginApiPost = async (endpoint, body) => {
+    if (endpoint === "editor/template-config") {
+      return { status: "error", message: "Invalid template action." };
+    }
+    return window.AstrBotPluginPage.apiPost(endpoint, body);
+  }`);
+  await editor.element("deleteConfirmBtn").dispatch("click");
+  assert.equal(editor.deleteRequests.length, 1);
+  assert.equal(editor.deleteRequests[0].template, "first");
+  assert.equal(editor.element("deleteConfirmOverlay").hidden, true);
+  assert.equal(editor.evaluate("currentTemplateName()"), "");
+});
+
+test("delete explains when neither route is loaded", async () => {
+  const editor = createEditor({
+    templates: {
+      first: { display_name: "First", background: "data:image/png;base64,AA==",
+        layer: { x: 100, y: 100, w: 300, h: 80 } },
+    },
+    current: "first",
+  });
+  await new Promise(setImmediate);
+  editor.element("templateConfigBtn").dispatch("click");
+  editor.element("drawerDeleteBtn").dispatch("click");
+  editor.evaluate(`pluginApiPost = async (endpoint) => ({ status: "error",
+    message: endpoint === "editor/template-config"
+      ? "Invalid template action." : "未找到该路由" })`);
+  await editor.element("deleteConfirmBtn").dispatch("click");
+  assert.equal(editor.element("deleteConfirmOverlay").hidden, false);
+  assert.equal(editor.element("deleteConfirmError").textContent,
+    "删除接口未加载，请重载插件后重试。");
+  assert.equal(editor.deleteRequests.length, 0);
+});
+
+test("confirmed deletion clears the active template and leaves the drawer open", async () => {
+  const editor = createEditor({
+    templates: {
+      first: { display_name: "First", background: "data:image/png;base64,AA==",
+        layer: { x: 100, y: 100, w: 300, h: 80 } },
+    },
+    current: "first",
+  });
+  await new Promise(setImmediate);
+  const listCount = editor.listRequests.length;
+  editor.element("templateConfigBtn").dispatch("click");
+  editor.element("drawerDeleteBtn").dispatch("click");
+  await editor.element("deleteConfirmBtn").dispatch("click");
+  assert.deepEqual(editor.deleteRequests.map(({ template }) => template), ["first"]);
+  assert.equal(editor.listRequests.length, listCount);
+  assert.equal(editor.element("deleteConfirmOverlay").hidden, true);
+  assert.equal(editor.element("drawerOverlay").hidden, false);
+  assert.equal(editor.element("templateGrid").children.length, 1);
+  assert.equal(editor.element("drawerDeleteBtn").disabled, true);
+  assert.equal(editor.evaluate("boundTemplateId"), "");
+  assert.equal(editor.evaluate("currentTemplateName()"), "");
+  assert.equal(editor.element("saveBtn").disabled, true);
+  editor.element("drawerCloseBtn").dispatch("click");
+  await new Promise(setImmediate);
+  assert.equal(editor.element("drawerOverlay").hidden, true);
+  assert.equal(editor.evaluate("currentTemplateName()"), "");
+});
+
+test("deleting a non-active template keeps the active template", async () => {
+  const editor = createEditor({
+    templates: {
+      first: { display_name: "First", background: "data:image/png;base64,AA==",
+        layer: { x: 100, y: 100, w: 300, h: 80 } },
+      second: { display_name: "Second", background: "data:image/png;base64,AA==",
+        layer: { x: 340, y: 180, w: 260, h: 70 } },
+    },
+    current: "first",
+  });
+  await new Promise(setImmediate);
+  const listCount = editor.listRequests.length;
+  editor.element("templateConfigBtn").dispatch("click");
+  await editor.element("templateGrid").children[1].dispatch("click");
+  editor.element("drawerDeleteBtn").dispatch("click");
+  await editor.element("deleteConfirmBtn").dispatch("click");
+  assert.equal(editor.deleteRequests[0].template, "second");
+  assert.equal(editor.listRequests.length, listCount);
+  assert.equal(editor.evaluate("boundTemplateId"), "first");
+  assert.equal(editor.evaluate("currentTemplateName()"), "first");
+  assert.equal(editor.state().x, 100);
+  assert.equal(editor.element("templateGrid").children.length, 2);
+});
+
+test("zoom slider has an accessible name without visible text", () => {
+  assert.match(html, /<div class="zoom-control">\s*<input id="zoomInput"[^>]*aria-label="缩放"/);
+  assert.doesNotMatch(html, /<label class="zoom-control">|<div class="zoom-control">\s*缩放/);
 });
 
 test("a template without an uploaded image can be edited and saved", async () => {
@@ -674,11 +871,12 @@ test("new template requires a name but accepts no preview image", async () => {
   const editor = createEditor();
   await new Promise(setImmediate);
   editor.element("templateConfigBtn").dispatch("click");
+  assert.equal(editor.element("drawerDeleteBtn").disabled, true);
   assert.equal(editor.element("drawerConfirmBtn").disabled, true);
   assert.equal(editor.element("drawerConfirmHint").title, "请输入模版名称");
   assert.equal(editor.element("drawerPreviewPlaceholder").hidden, false);
   assert.match(html, /id="drawerConfirmBtn"[^>]*>保存<\/button>/);
-  assert.match(html, /<label>图片<input id="drawerPreviewInput"/);
+  assert.match(html, /<label class="drawer-field"><span>图片<\/span><input id="drawerPreviewInput"/);
   assert.match(html, /id="drawerPreviewPlaceholder">暂无图片<\/span>/);
   editor.element("drawerNameInput").value = "New invitation";
   editor.element("drawerNameInput").dispatch("input");
@@ -703,9 +901,9 @@ test("failed template configuration keeps the drawer open and restores controls"
   assert.equal(editor.element("drawerOverlay").hidden, false);
   assert.equal(editor.element("drawerError").textContent, "Save failed");
   assert.equal(editor.element("drawerConfirmBtn").disabled, false);
-  assert.equal(editor.element("drawerCancelBtn").disabled, false);
+  assert.equal(editor.element("drawerDeleteBtn").disabled, true);
   assert.equal(editor.configRequests.length, 0);
-  editor.element("drawerCancelBtn").dispatch("click");
+  await editor.element("drawerCloseBtn").dispatch("click");
   assert.equal(editor.element("drawerOverlay").hidden, true);
 });
 

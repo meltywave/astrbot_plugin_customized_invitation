@@ -2,7 +2,7 @@ import json
 import re
 from io import BytesIO
 from pathlib import Path
-from shutil import copytree
+from shutil import copytree, rmtree
 from typing import Any
 
 from PIL import Image, UnidentifiedImageError
@@ -719,6 +719,25 @@ class TemplateManager:
         }
         self._write_config(template_dir, raw)
         return self._load_from_dir(template_dir, safe_name)
+
+    def delete_template(self, name: str, owner_key: str | None = None) -> None:
+        """Delete an existing template from its owning directory.
+
+        Args:
+            name: Template primary name.
+            owner_key: Owner of a user template, or None for a global template.
+
+        Raises:
+            TemplateConfigError: If the template is missing or cannot be removed.
+        """
+        base_dir = self._owner_dir(owner_key) if owner_key else self.templates_dir
+        template_dir = base_dir / self._safe_template_name(name)
+        if not (template_dir / "config.json").is_file() or template_dir.is_symlink():
+            raise TemplateConfigError(f"Template does not exist: {name}")
+        try:
+            rmtree(template_dir)
+        except OSError as err:
+            raise TemplateConfigError("Cannot delete template.") from err
 
     def _int(self, value: Any, field_name: str) -> int:
         """Parse an integer field.

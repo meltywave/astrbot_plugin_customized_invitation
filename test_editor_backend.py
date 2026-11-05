@@ -185,6 +185,134 @@ class EditorBackendTests(unittest.TestCase):
             self.manager.template_metadata(template)["preview"], "preview.png"
         )
 
+    def test_delete_endpoint_clears_bindings_and_rejects_other_owners(self) -> None:
+        state = InvitationState(self.root / "state.json")
+        with patch.dict(os.environ, {"ASTRBOT_ROOT": str(self.root)}):
+            from astrbot_plugin_customized_invitation.main import (
+                CustomizedInvitationPlugin,
+            )
+
+            plugin = CustomizedInvitationPlugin.__new__(CustomizedInvitationPlugin)
+            plugin.manager = self.manager
+            plugin.state = state
+
+            class RequestStub:
+                body: dict = {}
+
+                async def json(self, default):
+                    return self.body
+
+            request_stub = RequestStub()
+            with (
+                patch(
+                    "astrbot_plugin_customized_invitation.main.request", request_stub
+                ),
+                patch(
+                    "astrbot_plugin_customized_invitation.main.json_response",
+                    side_effect=lambda payload: payload,
+                ),
+                patch(
+                    "astrbot_plugin_customized_invitation.main.error_response",
+                    side_effect=lambda message, status_code=400: {
+                        "status": "error",
+                        "message": message,
+                    },
+                ),
+            ):
+                global_template = self.manager.create_empty_template("Shared")
+                token = state.create_upload_task("owner", "Shared")
+                request_stub.body = {
+                    "task": token,
+                    "action": "delete",
+                    "template": "Shared",
+                }
+                denied = asyncio.run(plugin.save_template_config())
+                self.assertEqual(denied["status"], "error")
+                self.assertTrue(global_template.directory.exists())
+
+                own_template = self.manager.create_empty_template("Private", "owner")
+                state.set_active_template("owner", "Private")
+                state.set_upload_task_template(token, "Private")
+                request_stub.body = {
+                    "task": token,
+                    "action": "delete",
+                    "template": "Private",
+                }
+                deleted = asyncio.run(plugin.save_template_config())
+                self.assertEqual(deleted, {"status": "ok", "deleted": "Private"})
+                self.assertFalse(own_template.directory.exists())
+                self.assertIsNone(state.get_active_template("owner"))
+                self.assertEqual(state.get_upload_task(token)["template_name"], "")
+
+    def test_disabling_last_template_clears_invitation_binding(self) -> None:
+        state = InvitationState(self.root / "state.json")
+        template = self.manager.create_empty_template("Shared")
+        token = state.create_upload_task("owner", "Shared")
+        state.set_active_template("owner", "Shared")
+
+        with patch.dict(os.environ, {"ASTRBOT_ROOT": str(self.root)}):
+            from astrbot_plugin_customized_invitation.main import (
+                CustomizedInvitationPlugin,
+            )
+
+            plugin = CustomizedInvitationPlugin.__new__(CustomizedInvitationPlugin)
+            plugin.manager = self.manager
+            plugin.state = state
+
+            class RequestStub:
+                async def json(self, default):
+                    return {
+                        "task": token,
+                        "action": "bind",
+                        "template": template.name,
+                        "active_template": "",
+                    }
+
+            with (
+                patch(
+                    "astrbot_plugin_customized_invitation.main.request", RequestStub()
+                ),
+                patch(
+                    "astrbot_plugin_customized_invitation.main.json_response",
+                    side_effect=lambda payload: payload,
+                ),
+            ):
+                result = asyncio.run(plugin.save_template_config())
+
+            self.assertEqual(result["active_template"], "")
+            self.assertIsNone(state.get_active_template("owner"))
+            self.assertEqual(state.get_upload_task(token)["template_name"], "")
+
+            class EventStub:
+                message_str = "/invitation Alice"
+
+                def get_platform_id(self):
+                    return "test"
+
+                def get_sender_id(self):
+                    return "owner"
+
+                def plain_result(self, value):
+                    return value
+
+            async def collect():
+                return [result async for result in plugin.invitation(EventStub())]
+
+            with patch.object(plugin, "_owner_key", return_value="owner"):
+                self.assertEqual(asyncio.run(collect()), ["当前无启用模版。"])
+
+    def test_explicit_global_disable_blocks_existing_user_selection(self) -> None:
+        state = InvitationState(self.root / "state.json")
+        state.set_active_template("owner", "Personal")
+        self.assertEqual(state.get_effective_template("owner"), "Personal")
+        state.set_active_template("editor-global", "")
+        self.assertIsNone(state.get_effective_template("owner"))
+        state.set_active_template("editor-global", "Shared")
+        self.assertEqual(state.get_effective_template("owner"), "Personal")
+        self.assertEqual(state.get_effective_template("other"), "Shared")
+        state.set_active_template("owner", "")
+        self.assertIsNone(state.get_effective_template("owner"))
+
     def test_template_binding_updates_upload_task(self) -> None:
         state = InvitationState(self.root / "state.json")
         token = state.create_upload_task("owner", "old")
@@ -232,6 +360,36 @@ class EditorBackendTests(unittest.TestCase):
             self.manager.update_template_metadata(first, "Second", None)
         self.assertEqual(self.manager.load("First").name, "First")
         self.assertEqual(self.manager.load("Second").directory, second.directory)
+
+    def test_deleting_template_removes_its_directory(self) -> None:
+        first = self.manager.create_empty_template("First")
+        second = self.manager.create_empty_template("Second")
+        self.manager.delete_template("First")
+        self.assertFalse(first.directory.exists())
+        self.assertEqual(self.manager.load("Second").directory, second.directory)
+        with self.assertRaisesRegex(TemplateConfigError, "does not exist"):
+            self.manager.delete_template("First")
+
+    def test_user_deletion_cannot_remove_global_template(self) -> None:
+        global_template = self.manager.create_empty_template("Shared")
+        user_template = self.manager.create_empty_template("Private", "owner")
+        with self.assertRaisesRegex(TemplateConfigError, "does not exist"):
+            self.manager.delete_template("Shared", "owner")
+        self.manager.delete_template("Private", "owner")
+        self.assertFalse(user_template.directory.exists())
+        self.assertTrue(global_template.directory.exists())
+
+    def test_deleting_template_clears_only_its_owner_bindings(self) -> None:
+        state = InvitationState(self.root / "state.json")
+        owner_task = state.create_upload_task("owner", "Shared")
+        other_task = state.create_upload_task("other", "Shared")
+        state.set_active_template("owner", "Shared")
+        state.set_active_template("other", "Shared")
+        state.clear_template_references("Shared", "owner")
+        self.assertEqual(state.get_upload_task(owner_task)["template_name"], "")
+        self.assertIsNone(state.get_active_template("owner"))
+        self.assertEqual(state.get_upload_task(other_task)["template_name"], "Shared")
+        self.assertEqual(state.get_active_template("other"), "Shared")
 
     def test_updating_existing_layer_preserves_background_and_other_layers(
         self,

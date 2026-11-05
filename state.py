@@ -80,6 +80,30 @@ class InvitationState:
         value = self._load().get("active_templates", {}).get(owner_key)
         return value if isinstance(value, str) and value.strip() else None
 
+    def get_effective_template(self, owner_key: str) -> str | None:
+        """Resolve a user's template while honoring an explicit global disable.
+
+        Args:
+            owner_key: Stable user storage key.
+
+        Returns:
+            Active template name, or None when templates are disabled.
+        """
+        active = self._load()["active_templates"]
+        global_name = active.get("editor-global")
+        if global_name == "":
+            return None
+        user_name = active.get(owner_key)
+        if user_name is not None:
+            return (
+                user_name if isinstance(user_name, str) and user_name.strip() else None
+            )
+        return (
+            global_name
+            if isinstance(global_name, str) and global_name.strip()
+            else None
+        )
+
     def rename_template_references(
         self, old_name: str, new_name: str, owner_key: str | None = None
     ) -> None:
@@ -106,6 +130,31 @@ class InvitationState:
         for owner, name in data["active_templates"].items():
             if name == old_name and (owner_key is None or owner == owner_key):
                 data["active_templates"][owner] = new_name
+        self._save(data)
+
+    def clear_template_references(
+        self, template_name: str, owner_key: str | None = None
+    ) -> None:
+        """Clear bindings that reference a deleted template.
+
+        Args:
+            template_name: Deleted template primary name.
+            owner_key: Owner of a user template, or None for a global template.
+
+        Returns:
+            None.
+        """
+        data = self._load()
+        for task in data["upload_tasks"].values():
+            if (
+                isinstance(task, dict)
+                and task.get("template_name") == template_name
+                and (owner_key is None or task.get("owner_key") == owner_key)
+            ):
+                task["template_name"] = ""
+        for owner, name in data["active_templates"].items():
+            if name == template_name and (owner_key is None or owner == owner_key):
+                data["active_templates"][owner] = ""
         self._save(data)
 
     def _load(self) -> dict:
