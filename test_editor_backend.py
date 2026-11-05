@@ -2,6 +2,7 @@ import json
 import sys
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -14,6 +15,7 @@ from astrbot_plugin_customized_invitation.manager import (  # noqa: E402
     TemplateManager,
 )
 from astrbot_plugin_customized_invitation.renderer import TemplateRenderer  # noqa: E402
+from astrbot_plugin_customized_invitation.state import InvitationState  # noqa: E402
 
 
 class EditorBackendTests(unittest.TestCase):
@@ -52,6 +54,54 @@ class EditorBackendTests(unittest.TestCase):
         self.assertEqual(
             self.manager.load("legacy").layers[0].orientation, "horizontal"
         )
+
+    def test_template_metadata_updates_without_changing_canvas_config(self) -> None:
+        source = self.root / "source.png"
+        Image.new("RGB", (240, 160), "white").save(source)
+        template = self.manager.create_from_image("sample", source, {})
+        original = (template.directory / "config.json").read_bytes()
+        self.assertEqual(
+            self.manager.template_metadata(template),
+            {"display_name": "sample", "preview": ""},
+        )
+
+        preview = BytesIO()
+        Image.new("RGB", (40, 30), "red").save(preview, format="PNG")
+        self.manager.update_template_metadata(template, "Renamed", preview.getvalue())
+        self.assertEqual(
+            self.manager.template_metadata(template),
+            {"display_name": "Renamed", "preview": "preview.png"},
+        )
+        self.assertEqual((template.directory / "config.json").read_bytes(), original)
+        with Image.open(template.directory / "preview.png") as image:
+            self.assertEqual(image.size, (40, 30))
+
+        self.manager.update_template_metadata(template, "Again", None)
+        self.assertEqual(
+            self.manager.template_metadata(template)["display_name"], "Again"
+        )
+        with Image.open(template.directory / "preview.png") as image:
+            self.assertEqual(image.size, (40, 30))
+
+    def test_invalid_template_metadata_does_not_replace_existing_values(self) -> None:
+        source = self.root / "source.png"
+        Image.new("RGB", (100, 100), "white").save(source)
+        template = self.manager.create_from_image("sample", source, {})
+        with self.assertRaisesRegex(TemplateConfigError, "1-64 characters"):
+            self.manager.update_template_metadata(template, "  ", None)
+        with self.assertRaisesRegex(TemplateConfigError, "Preview image is invalid"):
+            self.manager.update_template_metadata(template, "Changed", b"not an image")
+        self.assertEqual(
+            self.manager.template_metadata(template)["display_name"], "sample"
+        )
+
+    def test_template_binding_updates_upload_task(self) -> None:
+        state = InvitationState(self.root / "state.json")
+        token = state.create_upload_task("owner", "old")
+        state.set_upload_task_template(token, "new")
+        self.assertEqual(state.get_upload_task(token)["template_name"], "new")
+        with self.assertRaisesRegex(ValueError, "invalid or expired"):
+            state.set_upload_task_template("missing", "new")
 
     def test_vertical_orientation_round_trip_and_rendering(self) -> None:
         source = self.root / "source.png"

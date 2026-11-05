@@ -1,5 +1,6 @@
 import json
 import re
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -550,6 +551,68 @@ class TemplateManager:
                 'Template name cannot contain <>:"/\\|?* or control characters.'
             )
         return safe_name
+
+    def template_metadata(self, template: TemplateConfig) -> dict[str, str]:
+        """Read display metadata without changing the template's stable name.
+
+        Args:
+            template: Loaded template.
+
+        Returns:
+            Display name and optional preview filename.
+        """
+        path = template.directory / "meta.json"
+        try:
+            metadata = (
+                json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+            )
+        except (OSError, json.JSONDecodeError):
+            metadata = {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        display_name = metadata.get("display_name")
+        return {
+            "display_name": display_name
+            if isinstance(display_name, str) and display_name.strip()
+            else template.name,
+            "preview": "preview.png"
+            if (template.directory / "preview.png").is_file()
+            else "",
+        }
+
+    def update_template_metadata(
+        self, template: TemplateConfig, display_name: str, preview_bytes: bytes | None
+    ) -> None:
+        """Update a template's display name and optional preview image.
+
+        Args:
+            template: Loaded template to update.
+            display_name: Name shown in the editor.
+            preview_bytes: Replacement image bytes, or None to keep the current preview.
+
+        Raises:
+            TemplateConfigError: If the name or preview is invalid.
+        """
+        name = display_name.strip()
+        if not name or len(name) > 64:
+            raise TemplateConfigError("Template name must be 1-64 characters.")
+        preview = None
+        if preview_bytes is not None:
+            try:
+                with Image.open(BytesIO(preview_bytes)) as image:
+                    preview = image.convert("RGB")
+                    preview.thumbnail((480, 270))
+            except (OSError, UnidentifiedImageError) as err:
+                raise TemplateConfigError("Preview image is invalid.") from err
+        if preview is not None:
+            preview.save(template.directory / "preview.png")
+        try:
+            (template.directory / "meta.json").write_text(
+                json.dumps({"display_name": name}, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        except OSError as err:
+            raise TemplateConfigError("Cannot write template metadata.") from err
 
     def _int(self, value: Any, field_name: str) -> int:
         """Parse an integer field.

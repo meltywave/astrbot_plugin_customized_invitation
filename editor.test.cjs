@@ -13,6 +13,7 @@ assert.ok(script, "editor script must exist");
 
 function createEditor(templateData = { templates: {} }) {
   const elements = new Map();
+  let nextElement = 0;
   const textDraws = [];
   const lineDraws = [];
   const context2d = {
@@ -78,6 +79,10 @@ function createEditor(templateData = { templates: {} }) {
           return attributes.get(name);
         },
         children: [],
+        focus() {},
+        replaceChildren(...children) {
+          this.children = children;
+        },
         addEventListener(type, callback) {
           listeners.set(type, callback);
         },
@@ -130,24 +135,44 @@ function createEditor(templateData = { templates: {} }) {
   const document = {
     getElementById: element,
     querySelector: () => canvasWrap,
-    createElement: () => ({ value: "", textContent: "" }),
+    createElement: () => element(`dynamic-${nextElement++}`),
   };
   const saved = [];
+  const configRequests = [];
+  element("drawerOverlay").hidden = true;
   const windowListeners = new Map();
   const window = {
     location: { search: "", hash: "" },
     innerWidth: 1400,
     innerHeight: 800,
     addEventListener(type, callback) {
-      windowListeners.set(type, callback);
+      windowListeners.set(type, [...(windowListeners.get(type) || []), callback]);
     },
     dispatch(type, event) {
-      return windowListeners.get(type)?.(event);
+      for (const callback of windowListeners.get(type) || []) callback(event);
     },
     AstrBotPluginPage: {
       ready: async () => {},
       apiGet: async () => templateData,
-      apiPost: async (_endpoint, payload) => {
+      apiPost: async (endpoint, payload) => {
+        if (endpoint === "editor/template-config") {
+          configRequests.push(payload);
+          const id = payload.action === "create" ? `template-${configRequests.length}` : payload.template;
+          if (payload.action === "create") {
+            templateData.templates[id] = {
+              display_name: payload.display_name,
+              preview: payload.preview || "",
+              background: "data:image/png;base64,AA==",
+              layer: { x: 96, y: 220, w: 768, h: 96, fontsize: 48 },
+            };
+            (templateData.user_templates ||= []).push(id);
+          } else if (payload.action === "update") {
+            templateData.templates[id].display_name = payload.display_name;
+            if (payload.preview) templateData.templates[id].preview = payload.preview;
+          }
+          templateData.current = id;
+          return { status: "ok", template: id };
+        }
         saved.push(payload);
         return { template: payload.template_name };
       },
@@ -161,6 +186,12 @@ function createEditor(templateData = { templates: {} }) {
     console,
     fetch: async () => ({ blob: async () => ({}) }),
     createImageBitmap: async () => ({ width: 960, height: 540 }),
+    FileReader: class {
+      readAsDataURL(file) {
+        this.result = file.dataUrl;
+        this.onload();
+      }
+    },
   });
   vm.runInContext(script, environment);
 
@@ -191,15 +222,16 @@ function createEditor(templateData = { templates: {} }) {
     return vm.runInContext(expression, environment);
   }
 
-  function setImageDataUrl(value) {
+  function setImageDataUrl(value, templateId = "test") {
     environment.currentImageDataUrlForTest = value;
+    environment.boundTemplateIdForTest = templateId;
     vm.runInContext(
-      "currentImageDataUrl = currentImageDataUrlForTest",
+      "currentImageDataUrl = currentImageDataUrlForTest; boundTemplateId = boundTemplateIdForTest",
       environment,
     );
   }
 
-  return { canvas, canvasWrap, element, evaluate, keydown, lineDraws, pointer, saved, setImageDataUrl, state, textDraws };
+  return { canvas, canvasWrap, configRequests, element, evaluate, keydown, lineDraws, pointer, saved, setImageDataUrl, state, textDraws };
 }
 
 test("outside drag leaves the text box in place", () => {
@@ -212,13 +244,13 @@ test("outside drag leaves the text box in place", () => {
   assert.equal(editor.canvasWrap.capturedPointer, undefined);
 });
 
-test("toolbar is below the title and appears only while the frame is selected", () => {
+test("toolbar is below the top bar and appears only while the frame is selected", () => {
   assert.match(html, /<header class="topbar">[\s\S]*?<\/header>\s*<div class="selection-toolbar"[\s\S]*?<div class="canvas-wrap">/);
   assert.match(html, /<div class="editor-header">\s*<header class="topbar">/);
   assert.match(html, /\.editor-header\s*\{[^}]*position: sticky;[^}]*top: 0;/);
-  assert.match(html, /\.topbar\s*\{[^}]*flex-wrap: nowrap;[^}]*height: 88px;[^}]*overflow-x: auto;/);
+  assert.match(html, /\.topbar\s*\{[^}]*display: grid;[^}]*grid-template-columns: minmax\(0, 1fr\) auto minmax\(0, 1fr\);/);
   assert.match(html, /\.selection-toolbar\s*\{[^}]*flex-wrap: nowrap;[^}]*width: max-content;[^}]*margin: 12px auto 0;[^}]*height: 54px;[^}]*overflow-x: auto;/);
-  assert.match(html, /<h1 id="templateName"><\/h1>/);
+  assert.doesNotMatch(html, /id="templateName"/);
   assert.doesNotMatch(html, /邀请函模版编辑器/);
   const toolbarMarkup = html.match(/<div class="selection-toolbar"[\s\S]*?<div class="canvas-wrap">/)?.[0];
   assert.doesNotMatch(toolbarMarkup, /id="(?:newTemplateBtn|existingTemplateBtn|imageInput)"/);
@@ -239,17 +271,146 @@ test("toolbar is below the title and appears only while the frame is selected", 
   assert.equal(toolbar.inert, true);
 });
 
-test("template name is shown as the title and stays editable above the selection toolbar", () => {
+test("top bar shows template configuration and keeps canvas save separate", async () => {
   const editor = createEditor();
-  assert.equal(editor.element("templateName").textContent, "未命名模版");
-  editor.element("templateNameInput").value = "Spring invitation";
-  editor.element("templateNameInput").dispatch("input");
-  assert.equal(editor.element("templateName").textContent, "Spring invitation");
-  assert.match(html, /<header class="topbar">[\s\S]*?id="newTemplateBtn"[\s\S]*?id="imageInput"[\s\S]*?<\/header>/);
+  await new Promise(setImmediate);
+  assert.equal(editor.element("boundTemplateName").textContent, "无模版");
+  assert.equal(editor.element("saveBtn").disabled, true);
+  editor.setImageDataUrl("data:image/png;base64,AA==", "spring");
+  await editor.element("saveBtn").dispatch("click");
+  assert.equal(editor.saved[0].template_name, "spring");
+  assert.equal(editor.configRequests.length, 0);
+  assert.match(html, /id="templateConfigBtn"[^>]*>模版配置 ▾<\/button>/);
+  assert.doesNotMatch(html, /id="(?:newTemplateBtn|existingTemplateBtn|templateSelect|templateNameInput|imageInput)"/);
 });
 
-test("undo and redo buttons sit beside the template title", () => {
-  assert.match(html, /<h1 id="templateName"><\/h1>\s*<div class="history-controls"[\s\S]*?id="undoBtn"[\s\S]*?id="redoBtn"/);
+test("drawer lists templates in a two-column grid with the create card last", async () => {
+  const editor = createEditor({
+    templates: {
+      first: { display_name: "First", preview: "data:image/png;base64,AA==" },
+      second: { display_name: "Second", preview: "" },
+    },
+  });
+  await new Promise(setImmediate);
+  editor.element("templateConfigBtn").dispatch("click");
+  const cards = editor.element("templateGrid").children;
+  assert.equal(cards.length, 3);
+  assert.equal(cards[0].children[1].textContent, "First");
+  assert.equal(cards[1].children[0].textContent, "暂无预览图");
+  assert.match(cards[2].className, /create/);
+  assert.match(html, /\.template-drawer\s*\{[^}]*width: 440px;/);
+  assert.match(html, /\.template-grid\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
+  assert.match(html, /\.drawer-list\s*\{[^}]*overflow-y: auto;/);
+});
+
+test("drawer cancel, close, and overlay discard edits without requests", async () => {
+  const editor = createEditor({
+    templates: { first: { display_name: "First", preview: "" } }, current: "first",
+  });
+  await new Promise(setImmediate);
+  const button = editor.element("templateConfigBtn");
+  const overlay = editor.element("drawerOverlay");
+  for (const close of ["drawerCancelBtn", "drawerCloseBtn"]) {
+    button.dispatch("click");
+    editor.evaluate('selectDrawerTemplate("")');
+    editor.element("drawerNameInput").value = "Draft";
+    editor.element(close).dispatch("click");
+    assert.equal(overlay.hidden, true);
+    assert.equal(editor.element("boundTemplateName").textContent, "First");
+    assert.equal(editor.configRequests.length, 0);
+  }
+  button.dispatch("click");
+  editor.element("drawerNameInput").value = "Changed";
+  overlay.dispatch("click", { target: overlay });
+  assert.equal(overlay.hidden, true);
+  assert.equal(editor.configRequests.length, 0);
+  button.dispatch("click");
+  assert.equal(editor.element("drawerNameInput").value, "First");
+  assert.equal(button.getAttribute("aria-expanded"), "true");
+  editor.keydown("Escape");
+  assert.equal(button.getAttribute("aria-expanded"), "false");
+});
+
+test("switching an unchanged template only binds it", async () => {
+  const editor = createEditor({
+    templates: {
+      first: { display_name: "First", background: "data:image/png;base64,AA==" },
+      second: { display_name: "Second", background: "data:image/png;base64,AA==" },
+    },
+    current: "first",
+  });
+  await new Promise(setImmediate);
+  editor.element("templateConfigBtn").dispatch("click");
+  editor.element("templateGrid").children[1].dispatch("click");
+  assert.equal(editor.element("drawerNameInput").value, "Second");
+  assert.equal(editor.element("boundTemplateName").textContent, "First");
+  assert.equal(editor.configRequests.length, 0);
+  await editor.element("drawerConfirmBtn").dispatch("click");
+  assert.deepEqual(editor.configRequests.map(({ action, template }) => [action, template]), [["bind", "second"]]);
+  assert.equal(editor.element("boundTemplateName").textContent, "Second");
+  assert.equal(editor.element("drawerOverlay").hidden, true);
+});
+
+test("editing an existing template updates metadata and previews a selected file locally", async () => {
+  const editor = createEditor({
+    templates: { saved: { display_name: "Before", preview: "data:image/png;base64,AA==",
+      background: "data:image/png;base64,AA==" } },
+    current: "saved",
+  });
+  await new Promise(setImmediate);
+  editor.element("templateConfigBtn").dispatch("click");
+  assert.equal(editor.element("drawerNameInput").value, "Before");
+  assert.equal(editor.element("drawerPreviewImage").hidden, false);
+  editor.element("drawerNameInput").value = "After";
+  editor.element("drawerNameInput").dispatch("input");
+  const input = editor.element("drawerPreviewInput");
+  input.files = [{ dataUrl: "data:image/png;base64,BBBB" }];
+  await input.dispatch("change");
+  assert.equal(editor.element("drawerPreviewImage").src, "data:image/png;base64,BBBB");
+  assert.equal(editor.configRequests.length, 0);
+  await editor.element("drawerConfirmBtn").dispatch("click");
+  assert.equal(editor.configRequests[0].action, "update");
+  assert.equal(editor.configRequests[0].display_name, "After");
+  assert.equal(editor.configRequests[0].preview, "data:image/png;base64,BBBB");
+  assert.equal(editor.element("boundTemplateName").textContent, "After");
+});
+
+test("new template requires a name but accepts no preview image", async () => {
+  const editor = createEditor();
+  await new Promise(setImmediate);
+  editor.element("templateConfigBtn").dispatch("click");
+  assert.equal(editor.element("drawerConfirmBtn").disabled, true);
+  assert.equal(editor.element("drawerConfirmHint").title, "请输入模版名称");
+  assert.equal(editor.element("drawerPreviewPlaceholder").hidden, false);
+  editor.element("drawerNameInput").value = "New invitation";
+  editor.element("drawerNameInput").dispatch("input");
+  assert.equal(editor.element("drawerConfirmBtn").disabled, false);
+  await editor.element("drawerConfirmBtn").dispatch("click");
+  assert.equal(editor.configRequests[0].action, "create");
+  assert.equal(editor.configRequests[0].preview, undefined);
+  assert.equal(editor.element("boundTemplateName").textContent, "New invitation");
+  assert.equal(editor.element("saveBtn").disabled, false);
+});
+
+test("failed template configuration keeps the drawer open and restores controls", async () => {
+  const editor = createEditor();
+  await new Promise(setImmediate);
+  editor.element("templateConfigBtn").dispatch("click");
+  editor.element("drawerNameInput").value = "New";
+  editor.element("drawerNameInput").dispatch("input");
+  editor.evaluate('pluginApiPost = async () => { throw new Error("Save failed") }');
+  await editor.element("drawerConfirmBtn").dispatch("click");
+  assert.equal(editor.element("drawerOverlay").hidden, false);
+  assert.equal(editor.element("drawerError").textContent, "Save failed");
+  assert.equal(editor.element("drawerConfirmBtn").disabled, false);
+  assert.equal(editor.element("drawerCancelBtn").disabled, false);
+  assert.equal(editor.configRequests.length, 0);
+  editor.element("drawerCancelBtn").dispatch("click");
+  assert.equal(editor.element("drawerOverlay").hidden, true);
+});
+
+test("undo and redo remain at the left of the top bar", () => {
+  assert.match(html, /<header class="topbar">\s*<div class="topbar-actions">\s*<div class="history-controls"[\s\S]*?id="undoBtn"[\s\S]*?id="redoBtn"/);
 });
 
 test("undo and redo restore box geometry and branch after a new edit", () => {
@@ -332,9 +493,9 @@ test("loading another template resets undo and redo history", async () => {
   editor.pointer("pointerup", 170, 250);
   assert.equal(editor.element("undoBtn").disabled, false);
 
-  editor.evaluate('templateMode = "existing"');
-  editor.element("templateSelect").value = "saved";
-  await editor.element("templateSelect").dispatch("change");
+  editor.element("templateConfigBtn").dispatch("click");
+  editor.evaluate('selectDrawerTemplate("saved")');
+  await editor.element("drawerConfirmBtn").dispatch("click");
   assert.equal(editor.element("undoBtn").disabled, true);
   assert.equal(editor.element("redoBtn").disabled, true);
   assert.equal(editor.state().x, 100);
@@ -397,8 +558,7 @@ test("text style buttons update preview and save all formatting values", async (
   assert.equal(editor.textDraws.at(-1).text, "Sample");
   assert.match(editor.textDraws.at(-1).font, /^italic bold /);
   assert.ok(editor.lineDraws.at(-1).length >= 4);
-  editor.element("templateNameInput").value = "styled";
-  editor.setImageDataUrl("data:image/png;base64,AA==");
+  editor.setImageDataUrl("data:image/png;base64,AA==", "styled");
   await editor.element("saveBtn").dispatch("click");
   assert.equal(editor.saved.length, 1);
   for (const style of ["bold", "italic", "underline", "strikethrough"]) {
@@ -452,8 +612,7 @@ test("orientation button switches the shared alignment control and vertical prev
   assert.ok(glyphs.every((draw, index) => index === 0 || draw.y > glyphs[index - 1].y));
   assert.ok(editor.state().h > editor.state().w);
 
-  editor.element("templateNameInput").value = "vertical";
-  editor.setImageDataUrl("data:image/png;base64,AA==");
+  editor.setImageDataUrl("data:image/png;base64,AA==", "vertical");
   await editor.element("saveBtn").dispatch("click");
   assert.equal(editor.saved[0].orientation, "vertical");
 
@@ -493,8 +652,7 @@ test("vertical alignment changes glyph position without losing horizontal alignm
   assert.ok(editor.textDraws.at(-12).y > firstY);
   assert.equal(editor.evaluate("textAlign"), "right");
   assert.equal(editor.evaluate("textValign"), "bottom");
-  editor.element("templateNameInput").value = "aligned";
-  editor.setImageDataUrl("data:image/png;base64,AA==");
+  editor.setImageDataUrl("data:image/png;base64,AA==", "aligned");
   await editor.element("saveBtn").dispatch("click");
   assert.equal(editor.saved[0].align, "right");
   assert.equal(editor.saved[0].valign, "bottom");
@@ -603,8 +761,10 @@ test("zoom remains a display-only setting after loading an image", async () => {
   const editor = createEditor();
   editor.element("zoomInput").value = "150";
   editor.element("zoomInput").dispatch("input");
-  editor.element("imageInput").files = [{}];
-  await editor.element("imageInput").dispatch("change");
+  editor.element("templateConfigBtn").dispatch("click");
+  editor.element("drawerNameInput").value = "New";
+  editor.element("drawerNameInput").dispatch("input");
+  await editor.element("drawerConfirmBtn").dispatch("click");
   assert.equal(editor.element("editorSurface").style.width, `${editor.canvas.width * 1.5}px`);
   assert.equal(editor.element("zoomValue").textContent, "150%");
 });
@@ -613,18 +773,22 @@ test("image fitting uses the space below the fixed header", async () => {
   const editor = createEditor();
   editor.canvasWrap.clientWidth = 800;
   editor.canvasWrap.clientHeight = 500;
-  editor.element("imageInput").files = [{}];
-  await editor.element("imageInput").dispatch("change");
+  editor.element("templateConfigBtn").dispatch("click");
+  editor.element("drawerNameInput").value = "New";
+  editor.element("drawerNameInput").dispatch("input");
+  await editor.element("drawerConfirmBtn").dispatch("click");
   assert.ok(editor.canvas.width <= 680);
   assert.ok(editor.canvas.height <= 380);
 });
 
-test("uploading an image keeps the selected toolbar open", async () => {
+test("creating a template keeps the selected toolbar open", async () => {
   const editor = createEditor();
   editor.pointer("pointerdown", 480, 268);
   editor.pointer("pointerup", 480, 268);
-  editor.element("imageInput").files = [{}];
-  await editor.element("imageInput").dispatch("change");
+  editor.element("templateConfigBtn").dispatch("click");
+  editor.element("drawerNameInput").value = "New";
+  editor.element("drawerNameInput").dispatch("input");
+  await editor.element("drawerConfirmBtn").dispatch("click");
   assert.equal(editor.state().selected, true);
   assert.equal(editor.element("selectionToolbar").classList.contains("visible"), true);
 });
@@ -642,9 +806,9 @@ test("switching templates keeps the selected toolbar open", async () => {
   await new Promise(setImmediate);
   editor.pointer("pointerdown", 480, 268);
   editor.pointer("pointerup", 480, 268);
-  editor.evaluate('setTemplateMode("existing")');
-  editor.element("templateSelect").value = "saved";
-  await editor.element("templateSelect").dispatch("change");
+  editor.element("templateConfigBtn").dispatch("click");
+  editor.evaluate('selectDrawerTemplate("saved")');
+  await editor.element("drawerConfirmBtn").dispatch("click");
   assert.equal(editor.state().selected, true);
   assert.equal(editor.element("selectionToolbar").classList.contains("visible"), true);
 });
@@ -823,7 +987,6 @@ test("corner resize extends beyond the image and saves integer layer values", as
   assert.ok(Math.abs(resized.w / before.w - resized.fontSize / before.fontSize) < 1e-8);
   assert.ok(resized.w > 0 && resized.h > 0);
 
-  editor.element("templateNameInput").value = "test";
   editor.setImageDataUrl("data:image/png;base64,AA==");
   await editor.element("saveBtn").dispatch("click");
   assert.equal(editor.saved.length, 1);
@@ -1054,8 +1217,7 @@ test("rotation handle supports clockwise and counterclockwise drags", async () =
   editor.pointer("pointerup", centerX - 50, centerY);
   assert.ok(Math.abs(editor.state().rotation - 90) < 1e-8);
 
-  editor.element("templateNameInput").value = "turned";
-  editor.setImageDataUrl("data:image/png;base64,AA==");
+  editor.setImageDataUrl("data:image/png;base64,AA==", "turned");
   await editor.element("saveBtn").dispatch("click");
   assert.equal(editor.saved[0].rotation, "90");
 
@@ -1142,15 +1304,16 @@ test("rotation shifts a fitting frame fully inside the gray area", () => {
   editor.pointer("pointerup", centerX - 50, centerY);
 });
 
-test("new images start with a snug text box", async () => {
+test("new templates start with a usable text box", async () => {
   const editor = createEditor();
-  editor.element("imageInput").files = [{}];
-  await editor.element("imageInput").dispatch("change");
+  editor.element("templateConfigBtn").dispatch("click");
+  editor.element("drawerNameInput").value = "New";
+  editor.element("drawerNameInput").dispatch("input");
+  await editor.element("drawerConfirmBtn").dispatch("click");
   const box = editor.state();
-  assert.equal(box.fontSize, 45);
+  assert.equal(box.fontSize, 48);
   assert.ok(Math.abs(box.h - box.fontSize * 7 / 6) < 1e-8);
-  assert.ok(box.w < 960 / 2);
-  assert.ok(box.w > 7 * box.fontSize);
+  assert.ok(box.w > 0);
   assert.equal(box.rotation, 0);
 });
 

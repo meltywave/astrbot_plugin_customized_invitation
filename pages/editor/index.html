@@ -57,24 +57,24 @@
       }
 
       .topbar {
-        display: flex;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
         background: var(--panel);
         align-items: center;
-        justify-content: space-between;
-        flex-wrap: nowrap;
-        gap: 12px 20px;
+        gap: 12px;
         height: 88px;
         padding: 8px 18px;
         border-bottom: 1px solid var(--line);
-        overflow-x: auto;
+        overflow-x: hidden;
         overflow-y: hidden;
       }
 
-      .topbar-title {
+      .topbar-actions {
         display: flex;
         align-items: center;
         gap: 12px;
         flex: none;
+        min-width: 0;
       }
 
       .history-controls {
@@ -98,26 +98,187 @@
         color: var(--accent);
       }
 
-      .topbar h1 {
-        margin: 0;
-        font-size: 18px;
-        font-weight: 650;
-        letter-spacing: 0;
+      .template-config-trigger {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+      }
+
+      .template-config-trigger button {
+        flex: none;
+        padding: 0 14px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--text);
+      }
+
+      .template-bound-name {
+        overflow: hidden;
+        color: var(--muted);
+        font-size: 13px;
+        text-overflow: ellipsis;
         white-space: nowrap;
       }
 
-      .topbar-controls {
-        display: flex;
-        align-items: flex-end;
-        flex-wrap: nowrap;
-        gap: 10px 18px;
-        min-width: 0;
-        flex: none;
+      .topbar-actions .status {
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       #saveBtn {
-        flex: none;
+        justify-self: end;
+        padding: 0 18px;
       }
+
+      .drawer-overlay {
+        position: fixed;
+        z-index: 10;
+        inset: 0;
+        background: rgba(24, 31, 38, 0.4);
+        animation: drawer-backdrop-in 180ms ease-out;
+      }
+
+      .drawer-overlay[hidden] { display: none; }
+
+      .template-drawer {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        flex-direction: column;
+        width: 440px;
+        max-width: 100%;
+        background: var(--panel);
+        box-shadow: -8px 0 24px rgba(24, 31, 38, 0.12);
+        animation: drawer-slide-in 220ms ease-out;
+      }
+
+      @keyframes drawer-backdrop-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+
+      @keyframes drawer-slide-in {
+        from { transform: translateX(100%); }
+        to { transform: translateX(0); }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .drawer-overlay, .template-drawer { animation: none; }
+      }
+
+      .drawer-header,
+      .drawer-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px 20px;
+      }
+
+      .drawer-header { border-bottom: 1px solid var(--line); }
+      .drawer-header h2 { margin: 0; font-size: 17px; }
+      .drawer-footer { justify-content: flex-end; border-top: 1px solid var(--line); }
+      .drawer-footer button { padding: 0 16px; }
+
+      .drawer-close {
+        width: 32px;
+        min-height: 32px;
+        padding: 0;
+        background: transparent;
+        color: var(--text);
+        font-size: 24px;
+        line-height: 1;
+      }
+
+      .drawer-list {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 16px 20px;
+      }
+
+      .template-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .template-card {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        min-height: 140px;
+        padding: 0;
+        border: 2px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel);
+        color: var(--text);
+        text-align: left;
+      }
+
+      .template-card:hover { box-shadow: 0 4px 12px rgba(24, 31, 38, 0.14); }
+      .template-card.selected { border-color: var(--accent); }
+      .template-card img,
+      .card-placeholder {
+        width: 100%;
+        height: 104px;
+        object-fit: contain;
+        background: var(--bg);
+      }
+
+      .card-placeholder {
+        display: grid;
+        place-items: center;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .card-name {
+        width: 100%;
+        padding: 8px 10px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .template-card.create {
+        align-items: center;
+        justify-content: center;
+        border-style: dashed;
+        color: var(--accent);
+        text-align: center;
+      }
+
+      .create-plus { font-size: 32px; line-height: 1; }
+
+      .drawer-edit {
+        display: grid;
+        gap: 14px;
+        flex: none;
+        max-height: 55vh;
+        overflow-y: auto;
+        padding: 18px 20px;
+        border-top: 1px solid var(--line);
+      }
+
+      .drawer-preview {
+        display: grid;
+        place-items: center;
+        height: 130px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--bg);
+      }
+
+      .drawer-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
+      .drawer-preview img[hidden], .drawer-preview span[hidden] { display: none; }
+      .drawer-hint { margin: 0; color: var(--muted); font-size: 12px; }
+      .drawer-error { min-height: 18px; color: var(--danger); font-size: 12px; }
+      .cancel-button { background: var(--soft); color: var(--text); }
 
       .canvas-wrap {
         display: flex;
@@ -397,32 +558,6 @@
         padding: 0;
       }
 
-      .mode-switch {
-        display: flex;
-        overflow: hidden;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-      }
-
-      .mode-button {
-        border: 0;
-        border-radius: 0;
-        background: #ffffff;
-        color: var(--muted);
-        padding: 0 10px;
-      }
-
-      .mode-button + .mode-button {
-        border-left: 1px solid var(--line);
-      }
-
-      .mode-button.active {
-        background: var(--soft);
-        color: var(--accent);
-      }
-
-      .template-picker,
-      .template-name-field,
       .font-field {
         width: 150px;
       }
@@ -431,20 +566,12 @@
         width: 130px;
       }
 
-      .image-field {
-        width: 180px;
-      }
-
       .font-size-field {
         width: 64px;
       }
 
       .color-field {
         width: 42px;
-      }
-
-      .selection-toolbar input[type="file"] {
-        min-width: 0;
       }
 
       .preview-field {
@@ -567,8 +694,12 @@
 
       @media (max-width: 600px) {
         .topbar {
+          grid-template-columns: auto minmax(0, 1fr) auto;
           padding: 8px 12px;
         }
+
+        .template-config-trigger { gap: 4px; }
+        .template-config-trigger button { padding: 0 8px; }
 
         .selection-toolbar {
           max-width: calc(100% - 24px);
@@ -588,39 +719,16 @@
       <section class="stage">
         <div class="editor-header">
         <header class="topbar">
-          <div class="topbar-title">
-            <h1 id="templateName"></h1>
+          <div class="topbar-actions">
             <div class="history-controls" role="group" aria-label="编辑历史">
               <button id="undoBtn" class="history-button" type="button" title="撤销" aria-label="撤销" disabled>↶</button>
               <button id="redoBtn" class="history-button" type="button" title="重做" aria-label="重做" disabled>↷</button>
             </div>
             <div id="status" class="status"></div>
           </div>
-          <div class="topbar-controls">
-            <section class="group">
-              <p class="group-title">模版</p>
-              <div class="mode-switch" role="tablist" aria-label="模版操作">
-                <button id="newTemplateBtn" class="mode-button active" type="button">新增模版</button>
-                <button id="existingTemplateBtn" class="mode-button" type="button">选择已有</button>
-              </div>
-              <label id="templateSelectLabel" class="template-picker" hidden>
-                已上传模版
-                <select id="templateSelect">
-                  <option value="">请选择模版</option>
-                </select>
-              </label>
-              <label class="template-name-field">
-                模版名称
-                <input id="templateNameInput" type="text" maxlength="64" />
-              </label>
-            </section>
-            <section class="group">
-              <p class="group-title">图片</p>
-              <label class="image-field">
-                模版图片
-                <input id="imageInput" type="file" accept="image/*" />
-              </label>
-            </section>
+          <div class="template-config-trigger">
+            <button id="templateConfigBtn" type="button" aria-haspopup="dialog" aria-expanded="false">模版配置 ▾</button>
+            <span id="boundTemplateName" class="template-bound-name">无模版</span>
           </div>
           <button id="saveBtn" type="button" disabled>保存</button>
         </header>
@@ -735,6 +843,34 @@
       </section>
     </main>
 
+    <div id="drawerOverlay" class="drawer-overlay" hidden>
+      <aside id="templateDrawer" class="template-drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+        <div class="drawer-header">
+          <h2 id="drawerTitle">模版配置</h2>
+          <button id="drawerCloseBtn" class="drawer-close" type="button" title="关闭" aria-label="关闭">×</button>
+        </div>
+        <div class="drawer-list">
+          <div id="templateGrid" class="template-grid"></div>
+        </div>
+        <div class="drawer-edit">
+          <label>模版名称<input id="drawerNameInput" type="text" maxlength="64" /></label>
+          <div class="drawer-preview">
+            <img id="drawerPreviewImage" alt="模版预览图" hidden />
+            <span id="drawerPreviewPlaceholder">暂无预览图</span>
+          </div>
+          <label>预览图<input id="drawerPreviewInput" type="file" accept="image/*" /></label>
+          <p class="drawer-hint">修改已有模版的名称/预览图，会更新模版公共信息</p>
+          <div id="drawerError" class="drawer-error" role="alert"></div>
+        </div>
+        <div class="drawer-footer">
+          <button id="drawerCancelBtn" class="cancel-button" type="button">取消</button>
+          <span id="drawerConfirmHint" title="请输入模版名称">
+            <button id="drawerConfirmBtn" type="button" disabled>确认保存</button>
+          </span>
+        </div>
+      </aside>
+    </div>
+
     <script>
       const urlParams = new URLSearchParams(window.location.search);
       const parentHash = (() => {
@@ -762,20 +898,27 @@
       const alignmentGuide = document.getElementById("alignmentGuide");
       const rotationAngle = document.getElementById("rotationAngle");
       const ctx = canvas.getContext("2d");
-      const imageInput = document.getElementById("imageInput");
       const saveBtn = document.getElementById("saveBtn");
       const undoBtn = document.getElementById("undoBtn");
       const redoBtn = document.getElementById("redoBtn");
       const statusEl = document.getElementById("status");
-      const templateSelect = document.getElementById("templateSelect");
-      const templateSelectLabel = document.getElementById("templateSelectLabel");
-      const templateNameEl = document.getElementById("templateName");
-      const templateNameInput = document.getElementById("templateNameInput");
+      const templateConfigBtn = document.getElementById("templateConfigBtn");
+      const boundTemplateName = document.getElementById("boundTemplateName");
+      const drawerOverlay = document.getElementById("drawerOverlay");
+      const templateDrawer = document.getElementById("templateDrawer");
+      const drawerCloseBtn = document.getElementById("drawerCloseBtn");
+      const drawerCancelBtn = document.getElementById("drawerCancelBtn");
+      const drawerConfirmBtn = document.getElementById("drawerConfirmBtn");
+      const drawerConfirmHint = document.getElementById("drawerConfirmHint");
+      const drawerNameInput = document.getElementById("drawerNameInput");
+      const drawerPreviewInput = document.getElementById("drawerPreviewInput");
+      const drawerPreviewImage = document.getElementById("drawerPreviewImage");
+      const drawerPreviewPlaceholder = document.getElementById("drawerPreviewPlaceholder");
+      const drawerError = document.getElementById("drawerError");
+      const templateGrid = document.getElementById("templateGrid");
       const previewTextInput = document.getElementById("previewTextInput");
       const zoomInput = document.getElementById("zoomInput");
       const zoomValue = document.getElementById("zoomValue");
-      const newTemplateBtn = document.getElementById("newTemplateBtn");
-      const existingTemplateBtn = document.getElementById("existingTemplateBtn");
       const alignControl = document.getElementById("alignControl");
       const valignControl = document.getElementById("valignControl");
       const alignmentModeBtn = document.getElementById("alignmentModeBtn");
@@ -848,7 +991,10 @@
       let textValign = "middle";
       let orientation = "horizontal";
       const textStyles = { bold: false, italic: false, underline: false, strikethrough: false };
-      let templateMode = "new";
+      let boundTemplateId = "";
+      let draftTemplateId = "";
+      let draftPreviewData = "";
+      let drawerPending = false;
       let currentImageDataUrl = "";
       let templateDetails = {};
       function setStatus(text, kind) {
@@ -857,11 +1003,7 @@
       }
 
       function currentTemplateName() {
-        return templateNameInput.value.trim();
-      }
-
-      function updateTemplateTitle() {
-        templateNameEl.textContent = currentTemplateName() || "未命名模版";
+        return boundTemplateId;
       }
 
       function currentFontOption() {
@@ -1337,7 +1479,6 @@
           return;
         }
         imageFile = null;
-        imageInput.value = "";
         currentImageDataUrl = detail.background || "";
         if (currentImageDataUrl) {
           const response = await fetch(currentImageDataUrl);
@@ -1383,29 +1524,6 @@
           inputs.font.appendChild(selectOption);
         });
         selectFont("");
-      }
-
-      function setTemplateMode(mode) {
-        templateMode = mode;
-        const isExisting = templateMode === "existing";
-        newTemplateBtn.classList.toggle("active", !isExisting);
-        existingTemplateBtn.classList.toggle("active", isExisting);
-        templateSelectLabel.hidden = !isExisting;
-        templateNameInput.readOnly = isExisting;
-        if (isExisting) {
-          templateNameInput.value = templateSelect.value || "";
-        } else if (
-          templateSelect.value &&
-          templateNameInput.value === templateSelect.value
-        ) {
-          templateSelect.value = "";
-          templateNameInput.value = initialTemplateName || "";
-          if (!imageFile) {
-            currentImageDataUrl = "";
-          }
-        }
-        updateTemplateTitle();
-        updateSaveState();
       }
 
       function setIconControlValue(control, value) {
@@ -1560,95 +1678,158 @@
       }
 
       async function loadTemplates() {
-        templateNameInput.value = initialTemplateName;
-        updateTemplateTitle();
-        updateSaveState();
-
         try {
           const data = await pluginApiGet("editor/templates", { task });
           if (data.status === "error") {
             throw new Error(data.message || "Failed to load templates.");
           }
           templateDetails = data.templates || {};
-
-          const names = [
-            ...(data.user_templates || []),
-            ...(data.global_templates || []),
-          ];
-          [...new Set(names)].forEach((name) => {
-            const option = document.createElement("option");
-            option.value = name;
-            option.textContent = name;
-            templateSelect.appendChild(option);
-          });
-
           const currentName = data.current || initialTemplateName;
-          if (currentName) {
-            templateNameInput.value = currentName;
-            templateSelect.value = currentName;
-            if (templateSelect.value) {
-              setTemplateMode("existing");
-              await loadTemplateDetail(currentName);
-            }
+          boundTemplateId = templateDetails[currentName] ? currentName : "";
+          boundTemplateName.textContent = boundTemplateId
+            ? templateDetails[boundTemplateId].display_name || boundTemplateId
+            : "无模版";
+          if (boundTemplateId) {
+            await loadTemplateDetail(boundTemplateId);
           }
-          updateTemplateTitle();
           updateSaveState();
+          return true;
         } catch (error) {
           setStatus(error.message || "Failed to load templates.", "error");
+          return false;
         }
       }
 
-      templateSelect.addEventListener("change", async () => {
-        if (templateMode === "existing") {
-          templateNameInput.value = templateSelect.value || "";
-          if (templateSelect.value) {
-            await loadTemplateDetail(templateSelect.value);
+      function renderTemplateCards() {
+        templateGrid.replaceChildren();
+        for (const [name, detail] of Object.entries(templateDetails)) {
+          const card = document.createElement("button");
+          card.type = "button";
+          card.className = `template-card${draftTemplateId === name ? " selected" : ""}`;
+          card.title = detail.display_name || name;
+          card.setAttribute("aria-pressed", String(draftTemplateId === name));
+          if (detail.preview) {
+            const image = document.createElement("img");
+            image.src = detail.preview;
+            image.alt = "";
+            card.appendChild(image);
+          } else {
+            const placeholder = document.createElement("span");
+            placeholder.className = "card-placeholder";
+            placeholder.textContent = "暂无预览图";
+            card.appendChild(placeholder);
           }
+          const label = document.createElement("span");
+          label.className = "card-name";
+          label.textContent = detail.display_name || name;
+          card.appendChild(label);
+          card.addEventListener("click", () => selectDrawerTemplate(name));
+          templateGrid.appendChild(card);
         }
-        updateTemplateTitle();
-        updateSaveState();
+        const createCard = document.createElement("button");
+        createCard.type = "button";
+        createCard.className = `template-card create${draftTemplateId ? "" : " selected"}`;
+        createCard.innerHTML = '<span class="create-plus">+</span><span>新建模版</span>';
+        createCard.addEventListener("click", () => selectDrawerTemplate(""));
+        templateGrid.appendChild(createCard);
+      }
+
+      function selectDrawerTemplate(name) {
+        draftTemplateId = name;
+        draftPreviewData = "";
+        drawerPreviewInput.value = "";
+        drawerError.textContent = "";
+        const detail = templateDetails[name];
+        drawerNameInput.value = detail?.display_name || name || "";
+        drawerPreviewImage.src = detail?.preview || "";
+        drawerPreviewImage.hidden = !detail?.preview;
+        drawerPreviewPlaceholder.hidden = Boolean(detail?.preview);
+        drawerConfirmBtn.disabled = !drawerNameInput.value.trim();
+        drawerConfirmHint.title = drawerConfirmBtn.disabled ? "请输入模版名称" : "";
+        renderTemplateCards();
+      }
+
+      function closeDrawer() {
+        if (drawerPending) return;
+        drawerOverlay.hidden = true;
+        templateConfigBtn.setAttribute("aria-expanded", "false");
+        draftTemplateId = "";
+        draftPreviewData = "";
+        drawerNameInput.value = "";
+        drawerPreviewInput.value = "";
+        drawerError.textContent = "";
+        templateConfigBtn.focus();
+      }
+
+      templateConfigBtn.addEventListener("click", () => {
+        drawerOverlay.hidden = false;
+        templateConfigBtn.setAttribute("aria-expanded", "true");
+        selectDrawerTemplate(boundTemplateId);
+        drawerCloseBtn.focus();
+      });
+      drawerCloseBtn.addEventListener("click", closeDrawer);
+      drawerCancelBtn.addEventListener("click", closeDrawer);
+      drawerOverlay.addEventListener("click", (event) => {
+        if (event.target === drawerOverlay) closeDrawer();
+      });
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !drawerOverlay.hidden) closeDrawer();
+      });
+      drawerNameInput.addEventListener("input", () => {
+        drawerConfirmBtn.disabled = !drawerNameInput.value.trim();
+        drawerConfirmHint.title = drawerConfirmBtn.disabled ? "请输入模版名称" : "";
+      });
+      drawerPreviewInput.addEventListener("change", async () => {
+        const file = drawerPreviewInput.files?.[0];
+        if (!file) return;
+        try {
+          const preview = await readFileAsDataUrl(file);
+          if (drawerOverlay.hidden || drawerPreviewInput.files?.[0] !== file) return;
+          drawerPreviewImage.src = preview;
+          draftPreviewData = preview;
+          drawerPreviewImage.hidden = false;
+          drawerPreviewPlaceholder.hidden = true;
+          drawerError.textContent = "";
+        } catch {
+          drawerError.textContent = "无法读取预览图";
+        }
+      });
+      drawerConfirmBtn.addEventListener("click", async () => {
+        const name = drawerNameInput.value.trim();
+        if (!name) return;
+        const original = templateDetails[draftTemplateId];
+        const action = !draftTemplateId ? "create"
+          : original?.display_name !== name || draftPreviewData ? "update" : "bind";
+        drawerPending = true;
+        drawerConfirmBtn.disabled = true;
+        drawerCloseBtn.disabled = true;
+        drawerCancelBtn.disabled = true;
+        drawerError.textContent = "";
+        try {
+          const result = await pluginApiPost("editor/template-config", {
+            task, action, template: draftTemplateId,
+            display_name: name, preview: draftPreviewData || undefined,
+          });
+          if (result.status === "error") throw new Error(result.message);
+          if (!(await loadTemplates())) {
+            boundTemplateId = result.template;
+            boundTemplateName.textContent = name;
+            updateSaveState();
+          }
+          drawerPending = false;
+          closeDrawer();
+        } catch (error) {
+          drawerError.textContent = error.message || "保存模版配置失败";
+        } finally {
+          drawerPending = false;
+          drawerCloseBtn.disabled = false;
+          drawerCancelBtn.disabled = false;
+          drawerConfirmBtn.disabled = !drawerNameInput.value.trim();
+        }
       });
 
-      templateNameInput.addEventListener("input", () => {
-        if (templateMode === "new") {
-          templateSelect.value = "";
-        }
-        updateTemplateTitle();
-        updateSaveState();
-      });
-
-      newTemplateBtn.addEventListener("click", () => setTemplateMode("new"));
-      existingTemplateBtn.addEventListener("click", () =>
-        setTemplateMode("existing"),
-      );
       undoBtn.addEventListener("click", undo);
       redoBtn.addEventListener("click", redo);
-
-      imageInput.addEventListener("change", async () => {
-        imageFile = imageInput.files?.[0] || null;
-        if (!imageFile) {
-          updateSaveState();
-          return;
-        }
-        currentImageDataUrl = "";
-        bitmap = await createImageBitmap(imageFile);
-        fitCanvas(bitmap.width, bitmap.height);
-        fontSize = Math.max(32, Math.round(bitmap.height / 12));
-        const initialSize = textSize(fontSize, bitmap.width);
-        const boxWidth = Math.min(bitmap.width, Math.ceil(initialSize.w + fontSize / 3));
-        rect = {
-          x: Math.round((bitmap.width - boxWidth) / 2),
-          y: Math.round(bitmap.height * 0.45),
-          w: boxWidth,
-          h: textSize(fontSize, boxWidth).h,
-        };
-        rotation = 0;
-        inputs.fontsize.value = fontSize;
-        draw();
-        resetHistory();
-        updateSaveState();
-        setStatus("");
-      });
 
       inputs.fontsize.addEventListener("input", () => {
         fontSize = Math.max(8, Number(inputs.fontsize.value) || 48);
@@ -1966,7 +2147,6 @@
 
       initFontControls();
       initIconControls();
-      setTemplateMode("new");
       fitTextHeight();
       draw();
       resetHistory();

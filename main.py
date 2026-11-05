@@ -1,9 +1,12 @@
 import base64
 import binascii
 import hashlib
+from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote, urlencode
 from uuid import uuid4
+
+from PIL import Image, UnidentifiedImageError
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
@@ -63,6 +66,12 @@ class CustomizedInvitationPlugin(Star):
             self.list_editor_templates,
             ["GET"],
             "List templates available to the editor page.",
+        )
+        self.context.register_web_api(
+            f"/{PLUGIN_NAME}/editor/template-config",
+            self.save_template_config,
+            ["POST"],
+            "Create, update, or bind an editor template.",
         )
 
     @filter.command("upload_template", alias={UPLOAD_ALIAS})
@@ -204,8 +213,18 @@ class CustomizedInvitationPlugin(Star):
                     background_data_url = "data:image/png;base64," + base64.b64encode(
                         image_bytes
                     ).decode("ascii")
+                metadata = self.manager.template_metadata(template)
                 template_details[template_name] = {
                     "name": template.name,
+                    "display_name": metadata["display_name"],
+                    "preview": (
+                        "data:image/png;base64,"
+                        + base64.b64encode(
+                            (template.directory / "preview.png").read_bytes()
+                        ).decode("ascii")
+                        if metadata["preview"]
+                        else ""
+                    ),
                     "width": template.width,
                     "height": template.height,
                     "background": background_data_url,
@@ -235,13 +254,98 @@ class CustomizedInvitationPlugin(Star):
         return json_response(
             {
                 "status": "ok",
-                "current": str(task["template_name"]) if task else "",
+                "current": (
+                    str(task["template_name"])
+                    if task
+                    else self.state.get_active_template("editor-global") or ""
+                ),
                 "mode": "user" if task else "global",
                 "user_templates": user_templates,
                 "global_templates": global_templates,
                 "templates": template_details,
             }
         )
+
+    async def save_template_config(self):
+        """Persist drawer metadata or bind an existing template.
+
+        Returns:
+            JSON response with the bound template identifier.
+        """
+        body = await request.json({})
+        if not isinstance(body, dict):
+            return error_response("Invalid request payload.", status_code=400)
+        task_token = str(body.get("task") or "").strip()
+        task = self.state.get_upload_task(task_token) if task_token else None
+        if task_token and not task:
+            return error_response("Upload task is invalid or expired.", status_code=404)
+        action = str(body.get("action") or "")
+        template_id = str(body.get("template") or "").strip()
+        display_name = str(body.get("display_name") or "").strip()
+        if action not in {"create", "update", "bind"}:
+            return error_response("Invalid template action.", status_code=400)
+
+        preview_bytes = None
+        preview_data = body.get("preview")
+        if preview_data:
+            if not isinstance(preview_data, str) or not preview_data.startswith(
+                "data:image/"
+            ):
+                return error_response("Preview image is invalid.", status_code=400)
+            try:
+                preview_bytes = base64.b64decode(
+                    preview_data.split(",", 1)[1], validate=True
+                )
+                if len(preview_bytes) > 5 * 1024 * 1024:
+                    return error_response(
+                        "Preview image exceeds 5 MB.", status_code=400
+                    )
+                with Image.open(BytesIO(preview_bytes)) as preview_image:
+                    preview_image.verify()
+            except (IndexError, binascii.Error, OSError, UnidentifiedImageError):
+                return error_response("Preview image is invalid.", status_code=400)
+
+        try:
+            if action == "create":
+                if not display_name or len(display_name) > 64:
+                    return error_response(
+                        "Template name must be 1-64 characters.", status_code=400
+                    )
+                template_id = f"template_{uuid4().hex}"
+                blank_path = self.upload_dir / f"{template_id}.png"
+                Image.new("RGB", (960, 540), "white").save(blank_path)
+                try:
+                    template = (
+                        self.manager.create_for_user_from_image(
+                            str(task["owner_key"]), template_id, blank_path, {}
+                        )
+                        if task
+                        else self.manager.create_from_image(template_id, blank_path, {})
+                    )
+                finally:
+                    blank_path.unlink(missing_ok=True)
+                self.manager.update_template_metadata(
+                    template, display_name, preview_bytes
+                )
+            else:
+                template = (
+                    self.manager.load_for_user(str(task["owner_key"]), template_id)
+                    if task
+                    else self.manager.load(template_id)
+                )
+                if action == "update":
+                    self.manager.update_template_metadata(
+                        template, display_name, preview_bytes
+                    )
+
+            if task:
+                self.state.set_upload_task_template(task_token, template_id)
+                self.state.set_active_template(str(task["owner_key"]), template_id)
+            else:
+                self.state.set_active_template("editor-global", template_id)
+            return json_response({"status": "ok", "template": template_id})
+        except (TemplateConfigError, OSError, ValueError) as err:
+            return error_response(str(err), status_code=400)
 
     async def save_editor_template(self):
         """Save template data submitted from the plugin editor page.

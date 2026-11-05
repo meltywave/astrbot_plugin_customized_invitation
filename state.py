@@ -40,6 +40,23 @@ class InvitationState:
         task = self._load().get("upload_tasks", {}).get(token)
         return task if isinstance(task, dict) else None
 
+    def set_upload_task_template(self, token: str, template_name: str) -> None:
+        """Bind an upload task to the selected template.
+
+        Args:
+            token: Existing upload task token.
+            template_name: Template identifier.
+
+        Raises:
+            ValueError: If the task no longer exists.
+        """
+        data = self._load()
+        task = data.get("upload_tasks", {}).get(token)
+        if not isinstance(task, dict):
+            raise ValueError("Upload task is invalid or expired.")
+        task["template_name"] = template_name
+        self._save(data)
+
     def set_active_template(self, owner_key: str, template_name: str) -> None:
         """Set the active template for a user.
 
