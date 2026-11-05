@@ -80,6 +80,34 @@ class InvitationState:
         value = self._load().get("active_templates", {}).get(owner_key)
         return value if isinstance(value, str) and value.strip() else None
 
+    def rename_template_references(
+        self, old_name: str, new_name: str, owner_key: str | None = None
+    ) -> None:
+        """Update saved bindings when a template primary name changes.
+
+        Args:
+            old_name: Previous template identifier.
+            new_name: New template identifier.
+            owner_key: Owner of a user template, or None for a global template.
+
+        Returns:
+            None.
+        """
+        if old_name == new_name:
+            return
+        data = self._load()
+        for task in data["upload_tasks"].values():
+            if (
+                isinstance(task, dict)
+                and task.get("template_name") == old_name
+                and (owner_key is None or task.get("owner_key") == owner_key)
+            ):
+                task["template_name"] = new_name
+        for owner, name in data["active_templates"].items():
+            if name == old_name and (owner_key is None or owner == owner_key):
+                data["active_templates"][owner] = new_name
+        self._save(data)
+
     def _load(self) -> dict:
         """Load plugin state.
 

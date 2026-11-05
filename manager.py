@@ -2,6 +2,7 @@ import json
 import re
 from io import BytesIO
 from pathlib import Path
+from shutil import copytree
 from typing import Any
 
 from PIL import Image, UnidentifiedImageError
@@ -138,7 +139,7 @@ class TemplateManager:
         name: str,
         options: dict[str, str],
     ) -> TemplateConfig:
-        """Update a user template text layer.
+        """Update a user template text layer, copying a global template when needed.
 
         Args:
             owner_key: Stable user storage key.
@@ -151,10 +152,16 @@ class TemplateManager:
         Raises:
             TemplateConfigError: If the template or options are invalid.
         """
-        template = self._load_from_dir(
-            self._owner_dir(owner_key) / self._safe_template_name(name),
-            name,
-        )
+        user_dir = self._owner_dir(owner_key) / self._safe_template_name(name)
+        if not (user_dir / "config.json").is_file():
+            source = self.load(name)
+            try:
+                copytree(source.directory, user_dir, dirs_exist_ok=True)
+            except OSError as err:
+                raise TemplateConfigError(
+                    "Cannot copy template for this user."
+                ) from err
+        template = self._load_from_dir(user_dir, name)
         return self._update_text_layer(template, options)
 
     def _load_from_dir(self, template_dir: Path, fallback_name: str) -> TemplateConfig:
@@ -581,38 +588,137 @@ class TemplateManager:
         }
 
     def update_template_metadata(
-        self, template: TemplateConfig, display_name: str, preview_bytes: bytes | None
-    ) -> None:
-        """Update a template's display name and optional preview image.
+        self,
+        template: TemplateConfig,
+        display_name: str,
+        preview_bytes: bytes | None,
+        owner_key: str | None = None,
+    ) -> TemplateConfig:
+        """Update a template's primary name and optional canvas image.
 
         Args:
             template: Loaded template to update.
-            display_name: Name shown in the editor.
-            preview_bytes: Replacement image bytes, or None to keep the current preview.
+            display_name: New primary template name.
+            preview_bytes: Replacement canvas image bytes, or None to keep its image.
+            owner_key: Owner key for user templates, or None for a global template.
+
+        Returns:
+            Updated template configuration.
 
         Raises:
             TemplateConfigError: If the name or preview is invalid.
         """
-        name = display_name.strip()
-        if not name or len(name) > 64:
-            raise TemplateConfigError("Template name must be 1-64 characters.")
+        new_name = self._safe_template_name(display_name)
+        base_dir = self._owner_dir(owner_key) if owner_key else self.templates_dir
+        target_dir = base_dir / new_name
+        if target_dir != template.directory and (target_dir / "config.json").is_file():
+            raise TemplateConfigError("A template with this name already exists.")
+        if target_dir != template.directory and target_dir.exists():
+            raise TemplateConfigError(
+                "A template directory with this name already exists."
+            )
+
+        canvas_image = None
         preview = None
         if preview_bytes is not None:
             try:
                 with Image.open(BytesIO(preview_bytes)) as image:
+                    canvas_image = image.convert("RGBA")
                     preview = image.convert("RGB")
                     preview.thumbnail((480, 270))
             except (OSError, UnidentifiedImageError) as err:
-                raise TemplateConfigError("Preview image is invalid.") from err
-        if preview is not None:
-            preview.save(template.directory / "preview.png")
+                raise TemplateConfigError("Canvas image is invalid.") from err
+        if owner_key and template.directory.parent != base_dir:
+            try:
+                copytree(template.directory, target_dir)
+            except OSError as err:
+                raise TemplateConfigError(
+                    "Cannot copy template for this user."
+                ) from err
+            template = self._load_from_dir(target_dir, template.name)
         try:
-            (template.directory / "meta.json").write_text(
-                json.dumps({"display_name": name}, ensure_ascii=False, indent=2) + "\n",
+            if canvas_image is not None:
+                canvas_image.save(template.directory / ".canvas.tmp.png")
+                preview.save(template.directory / ".preview.tmp.png")
+            config_path = template.directory / "config.json"
+            raw: RawConfig = json.loads(config_path.read_text(encoding="utf-8"))
+            if target_dir != template.directory:
+                template.directory.rename(target_dir)
+            raw["name"] = new_name
+            if canvas_image is not None:
+                raw["width"], raw["height"] = canvas_image.size
+                raw["background"] = "bg.png"
+                scale_x = canvas_image.width / template.width
+                scale_y = canvas_image.height / template.height
+                for layer in raw["layers"]:
+                    if layer.get("type") != "text":
+                        continue
+                    for key, factor in (
+                        ("x", scale_x),
+                        ("y", scale_y),
+                        ("w", scale_x),
+                        ("h", scale_y),
+                        ("fontsize", min(scale_x, scale_y)),
+                    ):
+                        value = round(int(layer[key]) * factor)
+                        if key == "fontsize":
+                            layer[key] = max(8, value)
+                        elif key in {"w", "h"}:
+                            layer[key] = max(1, value)
+                        else:
+                            layer[key] = value
+            self._write_config(target_dir, raw)
+            (target_dir / "meta.json").write_text(
+                json.dumps({"display_name": new_name}, ensure_ascii=False, indent=2)
+                + "\n",
                 encoding="utf-8",
             )
-        except OSError as err:
-            raise TemplateConfigError("Cannot write template metadata.") from err
+            if canvas_image is not None:
+                (target_dir / ".canvas.tmp.png").replace(target_dir / "bg.png")
+                (target_dir / ".preview.tmp.png").replace(target_dir / "preview.png")
+        except (OSError, json.JSONDecodeError, KeyError) as err:
+            if canvas_image is not None:
+                (target_dir / ".canvas.tmp.png").unlink(missing_ok=True)
+                (template.directory / ".canvas.tmp.png").unlink(missing_ok=True)
+                (target_dir / ".preview.tmp.png").unlink(missing_ok=True)
+                (template.directory / ".preview.tmp.png").unlink(missing_ok=True)
+            if target_dir != template.directory and target_dir.exists():
+                target_dir.rename(template.directory)
+            raise TemplateConfigError("Cannot update template metadata.") from err
+        return self._load_from_dir(target_dir, new_name)
+
+    def create_empty_template(
+        self, name: str, owner_key: str | None = None
+    ) -> TemplateConfig:
+        """Create a blank template using its name as its primary identifier.
+
+        Args:
+            name: Primary template name.
+            owner_key: Owner key for a user template, or None for a global template.
+
+        Returns:
+            Created template configuration.
+
+        Raises:
+            TemplateConfigError: If the name is invalid or already exists.
+        """
+        safe_name = self._safe_template_name(name)
+        base_dir = self._owner_dir(owner_key) if owner_key else self.templates_dir
+        template_dir = base_dir / safe_name
+        if template_dir.exists():
+            raise TemplateConfigError("A template with this name already exists.")
+        template_dir.mkdir(parents=True, exist_ok=True)
+        raw = {
+            "name": safe_name,
+            "width": 960,
+            "height": 540,
+            "background_color": "#ffffff",
+            "layers": [
+                self._text_layer_to_raw(self._text_layer_from_options({}, 960, 540))
+            ],
+        }
+        self._write_config(template_dir, raw)
+        return self._load_from_dir(template_dir, safe_name)
 
     def _int(self, value: Any, field_name: str) -> int:
         """Parse an integer field.

@@ -11,7 +11,10 @@ const html = fs.readFileSync(
 const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
 assert.ok(script, "editor script must exist");
 
-function createEditor(templateData = { templates: {} }) {
+function createEditor(
+  templateData = { templates: {} },
+  fetchImpl = async () => ({ blob: async () => ({}) }),
+) {
   const elements = new Map();
   let nextElement = 0;
   const textDraws = [];
@@ -89,6 +92,9 @@ function createEditor(templateData = { templates: {} }) {
         dispatch(type, event = {}) {
           return listeners.get(type)?.(event);
         },
+        click() {
+          return this.dispatch("click");
+        },
         appendChild(child) {
           this.children.push(child);
         },
@@ -139,6 +145,8 @@ function createEditor(templateData = { templates: {} }) {
   };
   const saved = [];
   const configRequests = [];
+  const scheduledTimers = new Map();
+  let nextTimer = 0;
   element("drawerOverlay").hidden = true;
   const windowListeners = new Map();
   const window = {
@@ -157,21 +165,34 @@ function createEditor(templateData = { templates: {} }) {
       apiPost: async (endpoint, payload) => {
         if (endpoint === "editor/template-config") {
           configRequests.push(payload);
-          const id = payload.action === "create" ? `template-${configRequests.length}` : payload.template;
+          const id = payload.action === "bind" ? payload.template : payload.display_name;
           if (payload.action === "create") {
             templateData.templates[id] = {
-              display_name: payload.display_name,
+              display_name: id,
               preview: payload.preview || "",
-              background: "data:image/png;base64,AA==",
+              background: payload.preview || "",
+              background_color: "#ffffff",
+              width: payload.preview ? 320 : 960,
+              height: payload.preview ? 180 : 540,
               layer: { x: 96, y: 220, w: 768, h: 96, fontsize: 48 },
             };
             (templateData.user_templates ||= []).push(id);
           } else if (payload.action === "update") {
-            templateData.templates[id].display_name = payload.display_name;
-            if (payload.preview) templateData.templates[id].preview = payload.preview;
+            templateData.templates[id] = {
+              ...templateData.templates[payload.template], display_name: id,
+            };
+            if (payload.preview) {
+              templateData.templates[id].preview = payload.preview;
+              templateData.templates[id].background = payload.preview;
+              templateData.templates[id].width = 320;
+              templateData.templates[id].height = 180;
+            }
+            if (id !== payload.template) delete templateData.templates[payload.template];
           }
-          templateData.current = id;
-          return { status: "ok", template: id };
+          templateData.current = payload.action === "create"
+            ? id : payload.active_template === payload.template
+              ? id : payload.active_template || id;
+          return { status: "ok", template: id, active_template: templateData.current };
         }
         saved.push(payload);
         return { template: payload.template_name };
@@ -184,8 +205,19 @@ function createEditor(templateData = { templates: {} }) {
     window,
     URLSearchParams,
     console,
-    fetch: async () => ({ blob: async () => ({}) }),
-    createImageBitmap: async () => ({ width: 960, height: 540 }),
+    fetch: fetchImpl,
+    createImageBitmap: async (blob) => ({
+      width: blob?.width || 960,
+      height: blob?.height || 540,
+    }),
+    setTimeout(callback) {
+      const id = ++nextTimer;
+      scheduledTimers.set(id, callback);
+      return id;
+    },
+    clearTimeout(id) {
+      scheduledTimers.delete(id);
+    },
     FileReader: class {
       readAsDataURL(file) {
         this.result = file.dataUrl;
@@ -226,12 +258,19 @@ function createEditor(templateData = { templates: {} }) {
     environment.currentImageDataUrlForTest = value;
     environment.boundTemplateIdForTest = templateId;
     vm.runInContext(
-      "currentImageDataUrl = currentImageDataUrlForTest; boundTemplateId = boundTemplateIdForTest",
+      "currentImageDataUrl = currentImageDataUrlForTest; boundTemplateId = boundTemplateIdForTest; editingTemplateId = boundTemplateIdForTest",
       environment,
     );
   }
 
-  return { canvas, canvasWrap, configRequests, element, evaluate, keydown, lineDraws, pointer, saved, setImageDataUrl, state, textDraws };
+  function flushTimers() {
+    for (const [id, callback] of scheduledTimers) {
+      scheduledTimers.delete(id);
+      callback();
+    }
+  }
+
+  return { canvas, canvasWrap, configRequests, element, evaluate, flushTimers, keydown, lineDraws, pointer, saved, setImageDataUrl, state, textDraws };
 }
 
 test("outside drag leaves the text box in place", () => {
@@ -274,14 +313,25 @@ test("toolbar is below the top bar and appears only while the frame is selected"
 test("top bar shows template configuration and keeps canvas save separate", async () => {
   const editor = createEditor();
   await new Promise(setImmediate);
-  assert.equal(editor.element("boundTemplateName").textContent, "无模版");
+  assert.equal(editor.evaluate("boundTemplateId"), "");
+  assert.doesNotMatch(html, /id="boundTemplateName"/);
+  assert.match(html, /\.template-config-trigger button\s*\{[^}]*font-weight: 400;/);
   assert.equal(editor.element("saveBtn").disabled, true);
   editor.setImageDataUrl("data:image/png;base64,AA==", "spring");
   await editor.element("saveBtn").dispatch("click");
   assert.equal(editor.saved[0].template_name, "spring");
   assert.equal(editor.configRequests.length, 0);
-  assert.match(html, /id="templateConfigBtn"[^>]*>模版配置 ▾<\/button>/);
+  assert.match(html, /id="templateConfigBtn"[^>]*><svg class="config-icon"[^>]*><path d="M832 64H288[^>]*\/><\/svg><span>模版配置<\/span><\/button>/);
   assert.doesNotMatch(html, /id="(?:newTemplateBtn|existingTemplateBtn|templateSelect|templateNameInput|imageInput)"/);
+});
+
+test("canvas save briefly shows a short success notice", async () => {
+  const editor = createEditor();
+  editor.setImageDataUrl("data:image/png;base64,AA==");
+  await editor.element("saveBtn").dispatch("click");
+  assert.equal(editor.element("status").textContent, "已保存");
+  editor.flushTimers();
+  assert.equal(editor.element("status").textContent, "");
 });
 
 test("drawer lists templates in a two-column grid with the create card last", async () => {
@@ -295,8 +345,9 @@ test("drawer lists templates in a two-column grid with the create card last", as
   editor.element("templateConfigBtn").dispatch("click");
   const cards = editor.element("templateGrid").children;
   assert.equal(cards.length, 3);
-  assert.equal(cards[0].children[1].textContent, "First");
-  assert.equal(cards[1].children[0].textContent, "暂无预览图");
+  assert.equal(cards[0].children[1].children[0].textContent, "First");
+  assert.equal(cards[0].children[1].children[1].getAttribute("role"), "switch");
+  assert.equal(cards[1].children[0].textContent, "暂无图片");
   assert.match(cards[2].className, /create/);
   assert.match(html, /\.template-drawer\s*\{[^}]*width: 440px;/);
   assert.match(html, /\.template-grid\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
@@ -314,14 +365,14 @@ test("drawer cancel, close, and overlay discard edits without requests", async (
     button.dispatch("click");
     editor.evaluate('selectDrawerTemplate("")');
     editor.element("drawerNameInput").value = "Draft";
-    editor.element(close).dispatch("click");
+    await editor.element(close).dispatch("click");
     assert.equal(overlay.hidden, true);
-    assert.equal(editor.element("boundTemplateName").textContent, "First");
+    assert.equal(editor.evaluate("boundTemplateId"), "first");
     assert.equal(editor.configRequests.length, 0);
   }
   button.dispatch("click");
   editor.element("drawerNameInput").value = "Changed";
-  overlay.dispatch("click", { target: overlay });
+  await overlay.dispatch("click", { target: overlay });
   assert.equal(overlay.hidden, true);
   assert.equal(editor.configRequests.length, 0);
   button.dispatch("click");
@@ -331,7 +382,7 @@ test("drawer cancel, close, and overlay discard edits without requests", async (
   assert.equal(button.getAttribute("aria-expanded"), "false");
 });
 
-test("switching an unchanged template only binds it", async () => {
+test("the template switch enables one card and binds it without updating metadata", async () => {
   const editor = createEditor({
     templates: {
       first: { display_name: "First", background: "data:image/png;base64,AA==" },
@@ -341,21 +392,183 @@ test("switching an unchanged template only binds it", async () => {
   });
   await new Promise(setImmediate);
   editor.element("templateConfigBtn").dispatch("click");
-  editor.element("templateGrid").children[1].dispatch("click");
+  const firstSwitch = editor.element("templateGrid").children[0].children[1].children[1];
+  assert.equal(firstSwitch.getAttribute("aria-checked"), "true");
+  const secondSwitch = editor.element("templateGrid").children[1].children[1].children[1];
+  await secondSwitch.dispatch("click", { stopPropagation() {} });
+  assert.equal(editor.element("templateGrid").children[0].children[1].children[1].getAttribute("aria-checked"), "false");
+  assert.equal(editor.element("templateGrid").children[1].children[1].children[1].getAttribute("aria-checked"), "true");
   assert.equal(editor.element("drawerNameInput").value, "Second");
-  assert.equal(editor.element("boundTemplateName").textContent, "First");
+  assert.equal(editor.evaluate("boundTemplateId"), "first");
   assert.equal(editor.configRequests.length, 0);
   await editor.element("drawerConfirmBtn").dispatch("click");
   assert.deepEqual(editor.configRequests.map(({ action, template }) => [action, template]), [["bind", "second"]]);
-  assert.equal(editor.element("boundTemplateName").textContent, "Second");
+  assert.equal(editor.evaluate("boundTemplateId"), "second");
   assert.equal(editor.element("drawerOverlay").hidden, true);
+});
+
+test("editing a disabled card does not enable it when saved", async () => {
+  const editor = createEditor({
+    templates: {
+      first: { display_name: "First", background: "data:image/png;base64,AA==",
+        layer: { x: 100, y: 100, w: 300, h: 80 } },
+      second: { display_name: "Second", background: "data:image/png;base64,AA==",
+        layer: { x: 340, y: 180, w: 260, h: 70 } },
+    },
+    current: "first",
+  });
+  await new Promise(setImmediate);
+  editor.element("templateConfigBtn").dispatch("click");
+  await editor.element("templateGrid").children[1].dispatch("click");
+  editor.element("drawerNameInput").value = "Edited second";
+  editor.element("drawerNameInput").dispatch("input");
+  await editor.element("drawerConfirmBtn").dispatch("click");
+  assert.equal(editor.configRequests[0].action, "update");
+  assert.equal(editor.configRequests[0].template, "second");
+  assert.equal(editor.configRequests[0].active_template, "first");
+  assert.equal(editor.evaluate("boundTemplateId"), "first");
+  assert.equal(editor.evaluate("currentTemplateName()"), "Edited second");
+  assert.equal(editor.state().x, 340);
+});
+
+test("clicking another card previews its canvas and close keeps it editable", async () => {
+  const editor = createEditor({
+    templates: {
+      first: { display_name: "First", background: "data:image/png;base64,AA==",
+        layer: { x: 100, y: 100, w: 300, h: 80, fontsize: 40 } },
+      second: { display_name: "Second", background: "data:image/png;base64,AA==",
+        layer: { x: 340, y: 180, w: 260, h: 70, fontsize: 36 } },
+    },
+    current: "first",
+  });
+  await new Promise(setImmediate);
+  editor.element("templateConfigBtn").dispatch("click");
+  await editor.element("templateGrid").children[1].dispatch("click");
+  assert.equal(editor.state().x, 340);
+  assert.equal(editor.element("drawerNameInput").value, "Second");
+  assert.equal(editor.evaluate("boundTemplateId"), "first");
+  assert.equal(editor.configRequests.length, 0);
+
+  editor.element("drawerNameInput").value = "Uncommitted name";
+  await editor.element("drawerCloseBtn").dispatch("click");
+  assert.equal(editor.element("drawerOverlay").hidden, true);
+  assert.equal(editor.state().x, 340);
+  assert.equal(editor.evaluate("currentTemplateName()"), "second");
+  assert.equal(editor.configRequests.length, 0);
+  await editor.element("saveBtn").dispatch("click");
+  assert.equal(editor.saved[0].template_name, "second");
+});
+
+test("clicking the overlay keeps the selected card's canvas without saving config", async () => {
+  const editor = createEditor({
+    templates: {
+      first: { display_name: "First", background: "data:image/png;base64,AA==",
+        layer: { x: 100, y: 100, w: 300, h: 80 } },
+      second: { display_name: "Second", background: "data:image/png;base64,AA==",
+        layer: { x: 340, y: 180, w: 260, h: 70 } },
+    },
+    current: "first",
+  });
+  await new Promise(setImmediate);
+  editor.element("templateConfigBtn").dispatch("click");
+  await editor.element("templateGrid").children[1].dispatch("click");
+  const overlay = editor.element("drawerOverlay");
+  overlay.dispatch("click", { target: overlay });
+  await new Promise(setImmediate);
+  assert.equal(overlay.hidden, true);
+  assert.equal(editor.state().x, 340);
+  assert.equal(editor.evaluate("currentTemplateName()"), "second");
+  assert.equal(editor.configRequests.length, 0);
+});
+
+test("cancel restores unsaved canvas edits after previewing another card", async () => {
+  const editor = createEditor({
+    templates: {
+      first: { display_name: "First", background: "data:image/png;base64,AA==",
+        layer: { x: 100, y: 100, w: 300, h: 80, fontsize: 40 } },
+      second: { display_name: "Second", background: "data:image/png;base64,AA==",
+        layer: { x: 340, y: 180, w: 260, h: 70, fontsize: 36 } },
+    },
+    current: "first",
+  });
+  await new Promise(setImmediate);
+  editor.pointer("pointerdown", 200, 140);
+  editor.pointer("pointermove", 220, 150);
+  editor.pointer("pointerup", 220, 150);
+  const before = editor.state();
+  assert.equal(editor.element("undoBtn").disabled, false);
+
+  editor.element("templateConfigBtn").dispatch("click");
+  await editor.element("templateGrid").children[1].dispatch("click");
+  assert.equal(editor.state().x, 340);
+  editor.element("drawerCancelBtn").dispatch("click");
+  assert.deepEqual(editor.state(), before);
+  assert.equal(editor.evaluate("currentTemplateName()"), "first");
+  assert.equal(editor.evaluate("backgroundColor"), "#ffffff");
+  assert.equal(editor.element("undoBtn").disabled, false);
+  assert.equal(editor.configRequests.length, 0);
+});
+
+test("a template without an uploaded image can be edited and saved", async () => {
+  const editor = createEditor({
+    templates: {
+      image: { display_name: "Image", background: "data:image/png;base64,AA==",
+        layer: { id: "name", x: 100, y: 100, w: 300, h: 80 } },
+      default: { display_name: "Default", width: 1200, height: 675,
+        background_color: "#f7f2ea", layer: { id: "title", x: 120, y: 120,
+          w: 960, h: 90, fontsize: 64 } },
+    },
+    current: "image",
+  });
+  await new Promise(setImmediate);
+  editor.element("templateConfigBtn").dispatch("click");
+  await editor.element("templateGrid").children[1].dispatch("click");
+  await editor.element("drawerCloseBtn").dispatch("click");
+  assert.equal(editor.evaluate("bitmap"), null);
+  assert.equal(editor.evaluate("backgroundColor"), "#f7f2ea");
+  assert.equal(editor.element("saveBtn").disabled, false);
+  editor.element("previewTextInput").value = "Edited";
+  editor.element("previewTextInput").dispatch("input");
+  await editor.element("saveBtn").dispatch("click");
+  assert.equal(editor.saved[0].template_name, "default");
+  assert.equal(editor.saved[0].save_layer, true);
+  assert.equal(editor.saved[0].layer, "title");
+  assert.equal(editor.saved[0].image, undefined);
+  assert.equal(editor.saved[0].default, "Edited");
+});
+
+test("a slow earlier template load cannot replace a newer card selection", async () => {
+  let releaseSlow;
+  const editor = createEditor({
+    templates: {
+      first: { background: "first", layer: { x: 100, y: 100, w: 300, h: 80 } },
+      slow: { background: "slow", layer: { x: 250, y: 100, w: 300, h: 80 } },
+      last: { background: "last", layer: { x: 400, y: 100, w: 300, h: 80 } },
+    },
+    current: "first",
+  }, async (url) => ({
+    blob: async () => {
+      if (url === "slow") await new Promise((resolve) => { releaseSlow = resolve; });
+      return {};
+    },
+  }));
+  await new Promise(setImmediate);
+  editor.element("templateConfigBtn").dispatch("click");
+  const slowLoad = editor.element("templateGrid").children[1].dispatch("click");
+  await editor.element("templateGrid").children[2].dispatch("click");
+  assert.equal(editor.state().x, 400);
+  releaseSlow();
+  await slowLoad;
+  assert.equal(editor.state().x, 400);
+  await editor.element("drawerCloseBtn").dispatch("click");
+  assert.equal(editor.evaluate("currentTemplateName()"), "last");
 });
 
 test("editing an existing template updates metadata and previews a selected file locally", async () => {
   const editor = createEditor({
-    templates: { saved: { display_name: "Before", preview: "data:image/png;base64,AA==",
+    templates: { default: { display_name: "Before", preview: "data:image/png;base64,AA==",
       background: "data:image/png;base64,AA==" } },
-    current: "saved",
+    current: "default",
   });
   await new Promise(setImmediate);
   editor.element("templateConfigBtn").dispatch("click");
@@ -370,9 +583,91 @@ test("editing an existing template updates metadata and previews a selected file
   assert.equal(editor.configRequests.length, 0);
   await editor.element("drawerConfirmBtn").dispatch("click");
   assert.equal(editor.configRequests[0].action, "update");
+  assert.equal(editor.configRequests[0].template, "default");
   assert.equal(editor.configRequests[0].display_name, "After");
   assert.equal(editor.configRequests[0].preview, "data:image/png;base64,BBBB");
-  assert.equal(editor.element("boundTemplateName").textContent, "After");
+  assert.equal(editor.evaluate("templateDetails.After.display_name"), "After");
+  assert.equal(editor.saved.length, 0);
+});
+
+test("saving an uploaded image replaces the canvas without a second save", async () => {
+  const uploaded = "data:image/png;base64,BBBB";
+  const editor = createEditor({
+    templates: {
+      default: { display_name: "default", width: 1200, height: 675,
+        background_color: "#f7f2ea",
+        layer: { id: "title", x: 120, y: 120, w: 960, h: 90, fontsize: 64 } },
+    },
+    current: "default",
+  }, async (url) => ({ blob: async () =>
+    url === uploaded ? { width: 320, height: 180 } : {} }));
+  await new Promise(setImmediate);
+  assert.equal(editor.evaluate("bitmap"), null);
+  editor.element("templateConfigBtn").dispatch("click");
+  const input = editor.element("drawerPreviewInput");
+  input.files = [{ dataUrl: uploaded }];
+  await input.dispatch("change");
+  assert.equal(editor.configRequests.length, 0);
+  await editor.element("drawerConfirmBtn").dispatch("click");
+  assert.equal(editor.configRequests[0].action, "update");
+  assert.equal(editor.configRequests[0].preview, uploaded);
+  assert.equal(editor.evaluate("currentImageDataUrl"), uploaded);
+  assert.equal(editor.evaluate("bitmap.width"), 320);
+  assert.equal(editor.canvas.width, 320);
+  assert.equal(editor.canvas.height, 180);
+  assert.equal(editor.element("drawerOverlay").hidden, true);
+  assert.equal(editor.saved.length, 0);
+});
+
+test("creating a template with an image displays that image as its canvas", async () => {
+  const uploaded = "data:image/png;base64,CCCC";
+  const editor = createEditor({ templates: {} }, async () => ({
+    blob: async () => ({ width: 320, height: 180 }),
+  }));
+  await new Promise(setImmediate);
+  editor.element("templateConfigBtn").dispatch("click");
+  editor.element("drawerNameInput").value = "New image";
+  editor.element("drawerNameInput").dispatch("input");
+  const input = editor.element("drawerPreviewInput");
+  input.files = [{ dataUrl: uploaded }];
+  await input.dispatch("change");
+  await editor.element("drawerConfirmBtn").dispatch("click");
+  assert.equal(editor.configRequests[0].action, "create");
+  assert.equal(editor.configRequests[0].preview, uploaded);
+  assert.equal(editor.evaluate("currentTemplateName()"), "New image");
+  assert.equal(editor.evaluate("currentImageDataUrl"), uploaded);
+  assert.equal(editor.canvas.width, 320);
+  assert.equal(editor.canvas.height, 180);
+});
+
+test("renaming default without uploading an image preserves its preview", async () => {
+  const preview = "data:image/png;base64,AA==";
+  const editor = createEditor({
+    templates: {
+      default: {
+        display_name: "default",
+        preview,
+        background: preview,
+        layer: { x: 100, y: 100, w: 300, h: 80, fontsize: 40 },
+      },
+    },
+    current: "default",
+  });
+  await new Promise(setImmediate);
+  editor.element("templateConfigBtn").dispatch("click");
+  editor.element("drawerNameInput").value = "New name";
+  editor.element("drawerNameInput").dispatch("input");
+  assert.equal(editor.element("drawerConfirmBtn").disabled, false);
+  await editor.element("drawerConfirmBtn").dispatch("click");
+  assert.equal(editor.configRequests[0].action, "update");
+  assert.equal(editor.configRequests[0].template, "default");
+  assert.equal(editor.configRequests[0].preview, undefined);
+  assert.equal(editor.evaluate("templateDetails['New name'].display_name"), "New name");
+  assert.equal(editor.element("drawerOverlay").hidden, true);
+  assert.equal(editor.saved.length, 0);
+
+  editor.element("templateConfigBtn").dispatch("click");
+  assert.equal(editor.element("drawerPreviewImage").src, preview);
 });
 
 test("new template requires a name but accepts no preview image", async () => {
@@ -382,14 +677,19 @@ test("new template requires a name but accepts no preview image", async () => {
   assert.equal(editor.element("drawerConfirmBtn").disabled, true);
   assert.equal(editor.element("drawerConfirmHint").title, "请输入模版名称");
   assert.equal(editor.element("drawerPreviewPlaceholder").hidden, false);
+  assert.match(html, /id="drawerConfirmBtn"[^>]*>保存<\/button>/);
+  assert.match(html, /<label>图片<input id="drawerPreviewInput"/);
+  assert.match(html, /id="drawerPreviewPlaceholder">暂无图片<\/span>/);
   editor.element("drawerNameInput").value = "New invitation";
   editor.element("drawerNameInput").dispatch("input");
   assert.equal(editor.element("drawerConfirmBtn").disabled, false);
   await editor.element("drawerConfirmBtn").dispatch("click");
   assert.equal(editor.configRequests[0].action, "create");
   assert.equal(editor.configRequests[0].preview, undefined);
-  assert.equal(editor.element("boundTemplateName").textContent, "New invitation");
+  assert.equal(editor.evaluate("boundTemplateId"), "New invitation");
   assert.equal(editor.element("saveBtn").disabled, false);
+  assert.equal(editor.evaluate("currentTemplateName()"), "New invitation");
+  assert.equal(editor.element("drawerOverlay").hidden, true);
 });
 
 test("failed template configuration keeps the drawer open and restores controls", async () => {

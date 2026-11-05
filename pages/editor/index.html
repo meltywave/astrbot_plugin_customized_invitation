@@ -106,19 +106,21 @@
       }
 
       .template-config-trigger button {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
         flex: none;
         padding: 0 14px;
         border: 1px solid var(--line);
         background: var(--panel);
         color: var(--text);
+        font-weight: 400;
       }
 
-      .template-bound-name {
-        overflow: hidden;
-        color: var(--muted);
-        font-size: 13px;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+      .template-config-trigger button .config-icon {
+        width: 17px;
+        height: 17px;
+        fill: currentColor;
       }
 
       .topbar-actions .status {
@@ -236,13 +238,46 @@
         font-size: 13px;
       }
 
-      .card-name {
+      .card-footer {
+        display: flex;
+        align-items: center;
+        gap: 6px;
         width: 100%;
-        padding: 8px 10px;
+        padding: 7px 9px;
+      }
+
+      .card-name {
+        flex: 1;
+        min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+
+      .template-switch {
+        position: relative;
+        flex: none;
+        width: 32px;
+        min-height: 20px;
+        padding: 0;
+        border-radius: 10px;
+        background: var(--line);
+      }
+
+      .template-switch::after {
+        position: absolute;
+        top: 3px;
+        left: 3px;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: var(--panel);
+        content: "";
+        transition: transform 150ms ease;
+      }
+
+      .template-switch[aria-checked="true"] { background: var(--accent); }
+      .template-switch[aria-checked="true"]::after { transform: translateX(12px); }
 
       .template-card.create {
         align-items: center;
@@ -727,8 +762,7 @@
             <div id="status" class="status"></div>
           </div>
           <div class="template-config-trigger">
-            <button id="templateConfigBtn" type="button" aria-haspopup="dialog" aria-expanded="false">模版配置 ▾</button>
-            <span id="boundTemplateName" class="template-bound-name">无模版</span>
+            <button id="templateConfigBtn" type="button" aria-haspopup="dialog" aria-expanded="false"><svg class="config-icon" viewBox="64 64 896 896" aria-hidden="true"><path d="M832 64H288c-17.7 0-32 14.3-32 32v64h64v-32h480v672h-32v64h64c17.7 0 32-14.3 32-32V96c0-17.7-14.3-32-32-32zM704 192H160c-17.7 0-32 14.3-32 32v704c0 17.7 14.3 32 32 32h544c17.7 0 32-14.3 32-32V224c0-17.7-14.3-32-32-32zm-32 704H192V256h480v640z" /></svg><span>模版配置</span></button>
           </div>
           <button id="saveBtn" type="button" disabled>保存</button>
         </header>
@@ -855,17 +889,16 @@
         <div class="drawer-edit">
           <label>模版名称<input id="drawerNameInput" type="text" maxlength="64" /></label>
           <div class="drawer-preview">
-            <img id="drawerPreviewImage" alt="模版预览图" hidden />
-            <span id="drawerPreviewPlaceholder">暂无预览图</span>
+            <img id="drawerPreviewImage" alt="模版图片" hidden />
+            <span id="drawerPreviewPlaceholder">暂无图片</span>
           </div>
-          <label>预览图<input id="drawerPreviewInput" type="file" accept="image/*" /></label>
-          <p class="drawer-hint">修改已有模版的名称/预览图，会更新模版公共信息</p>
+          <label>图片<input id="drawerPreviewInput" type="file" accept="image/*" /></label>
           <div id="drawerError" class="drawer-error" role="alert"></div>
         </div>
         <div class="drawer-footer">
           <button id="drawerCancelBtn" class="cancel-button" type="button">取消</button>
           <span id="drawerConfirmHint" title="请输入模版名称">
-            <button id="drawerConfirmBtn" type="button" disabled>确认保存</button>
+            <button id="drawerConfirmBtn" type="button" disabled>保存</button>
           </span>
         </div>
       </aside>
@@ -903,7 +936,6 @@
       const redoBtn = document.getElementById("redoBtn");
       const statusEl = document.getElementById("status");
       const templateConfigBtn = document.getElementById("templateConfigBtn");
-      const boundTemplateName = document.getElementById("boundTemplateName");
       const drawerOverlay = document.getElementById("drawerOverlay");
       const templateDrawer = document.getElementById("templateDrawer");
       const drawerCloseBtn = document.getElementById("drawerCloseBtn");
@@ -992,18 +1024,25 @@
       let orientation = "horizontal";
       const textStyles = { bold: false, italic: false, underline: false, strikethrough: false };
       let boundTemplateId = "";
+      let editingTemplateId = "";
       let draftTemplateId = "";
+      let draftActiveId = "";
       let draftPreviewData = "";
       let drawerPending = false;
+      let drawerSession = null;
+      let templateLoadSequence = 0;
+      let selectionPromise = Promise.resolve(true);
       let currentImageDataUrl = "";
+      let backgroundColor = "#ffffff";
       let templateDetails = {};
+      let saveNoticeTimer = null;
       function setStatus(text, kind) {
         statusEl.textContent = text || "";
         statusEl.className = `status ${kind || ""}`.trim();
       }
 
       function currentTemplateName() {
-        return boundTemplateId;
+        return editingTemplateId;
       }
 
       function currentFontOption() {
@@ -1057,12 +1096,7 @@
         updateHistoryButtons();
       }
 
-      function restoreHistory(index) {
-        if (index < 0 || index >= history.length || index === historyIndex) {
-          return;
-        }
-        historyIndex = index;
-        const snapshot = history[historyIndex];
+      function applyEditorSnapshot(snapshot) {
         rect = { ...snapshot.rect };
         fontSize = snapshot.fontSize;
         rotation = snapshot.rotation;
@@ -1083,8 +1117,16 @@
         }
         setIconControlValue(alignControl, textAlign);
         setIconControlValue(valignControl, textValign);
-        updateHistoryButtons();
         draw();
+      }
+
+      function restoreHistory(index) {
+        if (index < 0 || index >= history.length || index === historyIndex) {
+          return;
+        }
+        historyIndex = index;
+        applyEditorSnapshot(history[historyIndex]);
+        updateHistoryButtons();
       }
 
       function undo() {
@@ -1096,8 +1138,8 @@
       }
 
       function updateSaveState() {
-        saveBtn.disabled =
-          (!imageFile && !currentImageDataUrl) || !currentTemplateName();
+        saveBtn.disabled = !currentTemplateName() ||
+          (!templateDetails[currentTemplateName()] && !imageFile && !currentImageDataUrl);
       }
 
       function imageBounds() {
@@ -1388,7 +1430,7 @@
         if (bitmap) {
           ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
         } else {
-          ctx.fillStyle = "#ffffff";
+          ctx.fillStyle = backgroundColor;
           ctx.fillRect(0, 0, canvas.width, canvas.height);
         }
 
@@ -1476,16 +1518,23 @@
       async function loadTemplateDetail(name) {
         const detail = templateDetails[name];
         if (!detail) {
-          return;
+          return false;
         }
-        imageFile = null;
-        currentImageDataUrl = detail.background || "";
-        if (currentImageDataUrl) {
-          const response = await fetch(currentImageDataUrl);
+        const sequence = ++templateLoadSequence;
+        const imageDataUrl = detail.background || "";
+        let nextBitmap = null;
+        if (imageDataUrl) {
+          const response = await fetch(imageDataUrl);
           const blob = await response.blob();
-          bitmap = await createImageBitmap(blob);
-          fitCanvas(bitmap.width, bitmap.height);
+          nextBitmap = await createImageBitmap(blob);
         }
+        if (sequence !== templateLoadSequence) return false;
+        imageFile = null;
+        currentImageDataUrl = imageDataUrl;
+        backgroundColor = detail.background_color || "#ffffff";
+        bitmap = nextBitmap;
+        fitCanvas(bitmap?.width || detail.width || canvas.width,
+          bitmap?.height || detail.height || canvas.height);
         const layer = detail.layer || {};
         rect = {
           x: Number(layer.x) || 0,
@@ -1513,6 +1562,7 @@
         draw();
         resetHistory();
         updateSaveState();
+        return true;
       }
 
       function initFontControls() {
@@ -1677,7 +1727,7 @@
         });
       }
 
-      async function loadTemplates() {
+      async function loadTemplates(preferredTemplateId = "") {
         try {
           const data = await pluginApiGet("editor/templates", { task });
           if (data.status === "error") {
@@ -1686,11 +1736,10 @@
           templateDetails = data.templates || {};
           const currentName = data.current || initialTemplateName;
           boundTemplateId = templateDetails[currentName] ? currentName : "";
-          boundTemplateName.textContent = boundTemplateId
-            ? templateDetails[boundTemplateId].display_name || boundTemplateId
-            : "无模版";
-          if (boundTemplateId) {
-            await loadTemplateDetail(boundTemplateId);
+          editingTemplateId = templateDetails[preferredTemplateId]
+            ? preferredTemplateId : boundTemplateId;
+          if (editingTemplateId) {
+            await loadTemplateDetail(editingTemplateId);
           }
           updateSaveState();
           return true;
@@ -1703,10 +1752,11 @@
       function renderTemplateCards() {
         templateGrid.replaceChildren();
         for (const [name, detail] of Object.entries(templateDetails)) {
-          const card = document.createElement("button");
-          card.type = "button";
+          const card = document.createElement("div");
           card.className = `template-card${draftTemplateId === name ? " selected" : ""}`;
           card.title = detail.display_name || name;
+          card.tabIndex = 0;
+          card.setAttribute("role", "button");
           card.setAttribute("aria-pressed", String(draftTemplateId === name));
           if (detail.preview) {
             const image = document.createElement("img");
@@ -1716,25 +1766,47 @@
           } else {
             const placeholder = document.createElement("span");
             placeholder.className = "card-placeholder";
-            placeholder.textContent = "暂无预览图";
+            placeholder.textContent = "暂无图片";
             card.appendChild(placeholder);
           }
+          const footer = document.createElement("div");
+          footer.className = "card-footer";
           const label = document.createElement("span");
           label.className = "card-name";
           label.textContent = detail.display_name || name;
-          card.appendChild(label);
-          card.addEventListener("click", () => selectDrawerTemplate(name));
+          footer.appendChild(label);
+          const toggle = document.createElement("button");
+          toggle.type = "button";
+          toggle.className = "template-switch";
+          toggle.setAttribute("role", "switch");
+          toggle.setAttribute("aria-label", `启用${detail.display_name || name}`);
+          toggle.setAttribute("aria-checked", String(draftActiveId === name));
+          toggle.addEventListener("click", (event) => {
+            event.stopPropagation();
+            draftActiveId = name;
+            selectDrawerTemplate(name, true);
+          });
+          footer.appendChild(toggle);
+          card.appendChild(footer);
+          card.addEventListener("click", () => selectDrawerTemplate(name, true));
+          card.addEventListener("keydown", (event) => {
+            if (event.target === card && (event.key === "Enter" || event.key === " ")) {
+              event.preventDefault();
+              selectDrawerTemplate(name, true);
+            }
+          });
           templateGrid.appendChild(card);
         }
         const createCard = document.createElement("button");
         createCard.type = "button";
         createCard.className = `template-card create${draftTemplateId ? "" : " selected"}`;
         createCard.innerHTML = '<span class="create-plus">+</span><span>新建模版</span>';
-        createCard.addEventListener("click", () => selectDrawerTemplate(""));
+        createCard.addEventListener("click", () => selectDrawerTemplate("", true));
         templateGrid.appendChild(createCard);
       }
 
-      function selectDrawerTemplate(name) {
+      function selectDrawerTemplate(name, previewCanvas = false) {
+        if (previewCanvas) ++templateLoadSequence;
         draftTemplateId = name;
         draftPreviewData = "";
         drawerPreviewInput.value = "";
@@ -1747,13 +1819,52 @@
         drawerConfirmBtn.disabled = !drawerNameInput.value.trim();
         drawerConfirmHint.title = drawerConfirmBtn.disabled ? "请输入模版名称" : "";
         renderTemplateCards();
+        if (previewCanvas && name && name !== editingTemplateId) {
+          selectionPromise = loadTemplateDetail(name).then((loaded) => {
+            if (loaded) {
+              editingTemplateId = name;
+              updateSaveState();
+            }
+            return loaded;
+          }).catch((error) => {
+            drawerError.textContent = error.message || "无法加载模版";
+            return false;
+          });
+          return selectionPromise;
+        }
+        selectionPromise = Promise.resolve(true);
+        return selectionPromise;
       }
 
-      function closeDrawer() {
+      function closeDrawer(keepSelection = false) {
         if (drawerPending) return;
+        if (!keepSelection) {
+          ++templateLoadSequence;
+          if (drawerSession) {
+            const session = drawerSession;
+            bitmap = session.bitmap;
+            imageFile = session.imageFile;
+            currentImageDataUrl = session.imageDataUrl;
+            backgroundColor = session.backgroundColor;
+            editingTemplateId = session.templateId;
+            scale = session.scale;
+            baseDisplayWidth = session.baseDisplayWidth;
+            canvas.width = session.canvasWidth;
+            canvas.height = session.canvasHeight;
+            editorSurface.style.width = session.surfaceWidth;
+            history = session.history;
+            historyIndex = session.historyIndex;
+            selected = session.selected;
+            applyEditorSnapshot(session.editor);
+            updateHistoryButtons();
+            updateSaveState();
+          }
+        }
+        drawerSession = null;
         drawerOverlay.hidden = true;
         templateConfigBtn.setAttribute("aria-expanded", "false");
         draftTemplateId = "";
+        draftActiveId = "";
         draftPreviewData = "";
         drawerNameInput.value = "";
         drawerPreviewInput.value = "";
@@ -1762,15 +1873,33 @@
       }
 
       templateConfigBtn.addEventListener("click", () => {
+        drawerSession = {
+          editor: editorSnapshot(), bitmap, imageFile, imageDataUrl: currentImageDataUrl,
+          backgroundColor,
+          templateId: editingTemplateId, scale, baseDisplayWidth,
+          canvasWidth: canvas.width, canvasHeight: canvas.height,
+          surfaceWidth: editorSurface.style.width,
+          history: history.slice(), historyIndex, selected,
+        };
         drawerOverlay.hidden = false;
         templateConfigBtn.setAttribute("aria-expanded", "true");
-        selectDrawerTemplate(boundTemplateId);
+        draftActiveId = boundTemplateId;
+        selectDrawerTemplate(editingTemplateId);
         drawerCloseBtn.focus();
       });
-      drawerCloseBtn.addEventListener("click", closeDrawer);
-      drawerCancelBtn.addEventListener("click", closeDrawer);
+      drawerCloseBtn.addEventListener("click", async () => {
+        const session = drawerSession;
+        const loaded = await selectionPromise;
+        if (drawerSession !== session || drawerOverlay.hidden) return;
+        if (!loaded) {
+          closeDrawer();
+        } else {
+          closeDrawer(Boolean(draftTemplateId));
+        }
+      });
+      drawerCancelBtn.addEventListener("click", () => closeDrawer());
       drawerOverlay.addEventListener("click", (event) => {
-        if (event.target === drawerOverlay) closeDrawer();
+        if (event.target === drawerOverlay) return drawerCloseBtn.click();
       });
       window.addEventListener("keydown", (event) => {
         if (event.key === "Escape" && !drawerOverlay.hidden) closeDrawer();
@@ -1791,7 +1920,7 @@
           drawerPreviewPlaceholder.hidden = true;
           drawerError.textContent = "";
         } catch {
-          drawerError.textContent = "无法读取预览图";
+          drawerError.textContent = "无法读取图片";
         }
       });
       drawerConfirmBtn.addEventListener("click", async () => {
@@ -1809,15 +1938,16 @@
           const result = await pluginApiPost("editor/template-config", {
             task, action, template: draftTemplateId,
             display_name: name, preview: draftPreviewData || undefined,
+            active_template: draftActiveId || draftTemplateId,
           });
           if (result.status === "error") throw new Error(result.message);
-          if (!(await loadTemplates())) {
-            boundTemplateId = result.template;
-            boundTemplateName.textContent = name;
+          if (!(await loadTemplates(result.template))) {
+            boundTemplateId = result.active_template || result.template;
+            editingTemplateId = result.template;
             updateSaveState();
           }
           drawerPending = false;
-          closeDrawer();
+          closeDrawer(true);
         } catch (error) {
           drawerError.textContent = error.message || "保存模版配置失败";
         } finally {
@@ -2099,20 +2229,27 @@
           setStatus("Please enter a template name.", "error");
           return;
         }
-        if (!imageFile && !currentImageDataUrl) {
+        const existing = templateDetails[currentTemplateName()];
+        if (!existing && !imageFile && !currentImageDataUrl) {
           setStatus("Please choose a template image.", "error");
           return;
         }
         saveBtn.disabled = true;
+        if (saveNoticeTimer) clearTimeout(saveNoticeTimer);
         setStatus("保存中...");
         const payload = {};
         if (task) {
           payload.task = task;
         }
         payload.template_name = currentTemplateName();
-        payload.image = imageFile
-          ? await readFileAsDataUrl(imageFile)
-          : currentImageDataUrl;
+        if (existing) {
+          payload.save_layer = true;
+          payload.layer = existing.layer?.id || "name";
+        } else {
+          payload.image = imageFile
+            ? await readFileAsDataUrl(imageFile)
+            : currentImageDataUrl;
+        }
         payload.x = String(Math.round(rect.x));
         payload.y = String(Math.round(rect.y));
         payload.w = String(Math.round(rect.w));
@@ -2137,7 +2274,24 @@
           if (data.status === "error") {
             throw new Error(data.message || "Failed to save template.");
           }
-          setStatus(`Saved template: ${data.template}`, "ok");
+          if (existing) {
+            existing.layer = {
+              ...existing.layer,
+              x: Math.round(rect.x), y: Math.round(rect.y),
+              w: Math.round(rect.w), h: Math.round(rect.h),
+              fontsize: Math.round(fontSize), rotation: Math.round(rotation),
+              color: payload.color, align: textAlign, valign: textValign,
+              orientation, bold: textStyles.bold, italic: textStyles.italic,
+              underline: textStyles.underline,
+              strikethrough: textStyles.strikethrough,
+              default: previewTextInput.value, font: currentFontValue(),
+            };
+          }
+          setStatus("已保存", "ok");
+          saveNoticeTimer = setTimeout(() => {
+            if (statusEl.textContent === "已保存") setStatus("");
+            saveNoticeTimer = null;
+          }, 2500);
         } catch (error) {
           setStatus(error.message || "Failed to save template.", "error");
         } finally {

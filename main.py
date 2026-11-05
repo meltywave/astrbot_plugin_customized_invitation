@@ -228,8 +228,10 @@ class CustomizedInvitationPlugin(Star):
                     "width": template.width,
                     "height": template.height,
                     "background": background_data_url,
+                    "background_color": template.background_color,
                     "layer": {
                         "x": layer.x if layer else 0,
+                        "id": layer.id if layer else "name",
                         "y": layer.y if layer else 0,
                         "w": layer.w if layer else template.width,
                         "h": layer.h if layer else template.height,
@@ -281,6 +283,7 @@ class CustomizedInvitationPlugin(Star):
             return error_response("Upload task is invalid or expired.", status_code=404)
         action = str(body.get("action") or "")
         template_id = str(body.get("template") or "").strip()
+        active_id = str(body.get("active_template") or template_id).strip()
         display_name = str(body.get("display_name") or "").strip()
         if action not in {"create", "update", "bind"}:
             return error_response("Invalid template action.", status_code=400)
@@ -307,43 +310,54 @@ class CustomizedInvitationPlugin(Star):
 
         try:
             if action == "create":
-                if not display_name or len(display_name) > 64:
-                    return error_response(
-                        "Template name must be 1-64 characters.", status_code=400
-                    )
-                template_id = f"template_{uuid4().hex}"
-                blank_path = self.upload_dir / f"{template_id}.png"
-                Image.new("RGB", (960, 540), "white").save(blank_path)
-                try:
-                    template = (
-                        self.manager.create_for_user_from_image(
-                            str(task["owner_key"]), template_id, blank_path, {}
-                        )
-                        if task
-                        else self.manager.create_from_image(template_id, blank_path, {})
-                    )
-                finally:
-                    blank_path.unlink(missing_ok=True)
-                self.manager.update_template_metadata(
-                    template, display_name, preview_bytes
+                if preview_bytes is not None:
+                    with Image.open(BytesIO(preview_bytes)) as preview_image:
+                        preview_image.load()
+                template = self.manager.create_empty_template(
+                    display_name, str(task["owner_key"]) if task else None
                 )
+                if preview_bytes is not None:
+                    self.manager.update_template_metadata(
+                        template, display_name, preview_bytes
+                    )
+                template_id = template.name
+                active_id = template_id
             else:
                 template = (
                     self.manager.load_for_user(str(task["owner_key"]), template_id)
                     if task
                     else self.manager.load(template_id)
                 )
+                if active_id != template_id:
+                    if task:
+                        self.manager.load_for_user(str(task["owner_key"]), active_id)
+                    else:
+                        self.manager.load(active_id)
                 if action == "update":
-                    self.manager.update_template_metadata(
-                        template, display_name, preview_bytes
+                    old_name = template_id
+                    template = self.manager.update_template_metadata(
+                        template,
+                        display_name,
+                        preview_bytes,
+                        str(task["owner_key"]) if task else None,
+                    )
+                    template_id = template.name
+                    if active_id == old_name:
+                        active_id = template_id
+                    self.state.rename_template_references(
+                        old_name,
+                        template_id,
+                        str(task["owner_key"]) if task else None,
                     )
 
             if task:
-                self.state.set_upload_task_template(task_token, template_id)
-                self.state.set_active_template(str(task["owner_key"]), template_id)
+                self.state.set_upload_task_template(task_token, active_id)
+                self.state.set_active_template(str(task["owner_key"]), active_id)
             else:
-                self.state.set_active_template("editor-global", template_id)
-            return json_response({"status": "ok", "template": template_id})
+                self.state.set_active_template("editor-global", active_id)
+            return json_response(
+                {"status": "ok", "template": template_id, "active_template": active_id}
+            )
         except (TemplateConfigError, OSError, ValueError) as err:
             return error_response(str(err), status_code=400)
 
@@ -357,7 +371,6 @@ class CustomizedInvitationPlugin(Star):
         body = await request.json({}) if "application/json" in content_type else {}
         if body and not isinstance(body, dict):
             return error_response("Invalid request payload.", status_code=400)
-
         form = {}
         files = {}
         if not body:
@@ -372,25 +385,6 @@ class CustomizedInvitationPlugin(Star):
         task = self.state.get_upload_task(task_token) if task_token else None
         if task_token and not task:
             return error_response("Upload task is invalid or expired.", status_code=404)
-
-        upload_path = self.upload_dir / f"{task_token or uuid4().hex}.upload"
-        self.upload_dir.mkdir(parents=True, exist_ok=True)
-        if body:
-            image_data = str(body.get("image") or "")
-            if image_data.startswith("data:"):
-                image_data = image_data.split(",", 1)[1] if "," in image_data else ""
-            if not image_data:
-                return error_response("Please upload one template image.")
-            try:
-                upload_path.write_bytes(base64.b64decode(image_data, validate=True))
-            except (binascii.Error, OSError) as err:
-                logger.warning("Failed to decode uploaded template image: %s", err)
-                return error_response("Uploaded image data is invalid.")
-        else:
-            image_file = files.get("image")
-            if image_file is None:
-                return error_response("Please upload one template image.")
-            await image_file.save(upload_path)
 
         options: dict[str, str] = {}
         for key in (
@@ -414,6 +408,40 @@ class CustomizedInvitationPlugin(Star):
             value = body.get(key) if body else form.get(key)
             if value is not None:
                 options[key] = str(value)
+
+        if body and body.get("save_layer") is True:
+            template_name = str(body.get("template_name") or "").strip()
+            options["layer"] = str(body.get("layer") or "name")
+            try:
+                template = (
+                    self.manager.update_user_text_layer(
+                        str(task["owner_key"]), template_name, options
+                    )
+                    if task
+                    else self.manager.update_text_layer(template_name, options)
+                )
+            except TemplateConfigError as err:
+                return error_response(str(err), status_code=400)
+            return json_response({"status": "ok", "template": template.name})
+
+        upload_path = self.upload_dir / f"{task_token or uuid4().hex}.upload"
+        self.upload_dir.mkdir(parents=True, exist_ok=True)
+        if body:
+            image_data = str(body.get("image") or "")
+            if image_data.startswith("data:"):
+                image_data = image_data.split(",", 1)[1] if "," in image_data else ""
+            if not image_data:
+                return error_response("Please upload one template image.")
+            try:
+                upload_path.write_bytes(base64.b64decode(image_data, validate=True))
+            except (binascii.Error, OSError) as err:
+                logger.warning("Failed to decode uploaded template image: %s", err)
+                return error_response("Uploaded image data is invalid.")
+        else:
+            image_file = files.get("image")
+            if image_file is None:
+                return error_response("Please upload one template image.")
+            await image_file.save(upload_path)
 
         try:
             template_name = str(

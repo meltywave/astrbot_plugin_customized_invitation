@@ -1,9 +1,13 @@
+import asyncio
+import base64
 import json
+import os
 import sys
 import tempfile
 import unittest
 from io import BytesIO
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image, ImageDraw
 
@@ -55,7 +59,7 @@ class EditorBackendTests(unittest.TestCase):
             self.manager.load("legacy").layers[0].orientation, "horizontal"
         )
 
-    def test_template_metadata_updates_without_changing_canvas_config(self) -> None:
+    def test_uploaded_image_replaces_template_canvas_and_preview(self) -> None:
         source = self.root / "source.png"
         Image.new("RGB", (240, 160), "white").save(source)
         template = self.manager.create_from_image("sample", source, {})
@@ -67,20 +71,36 @@ class EditorBackendTests(unittest.TestCase):
 
         preview = BytesIO()
         Image.new("RGB", (40, 30), "red").save(preview, format="PNG")
-        self.manager.update_template_metadata(template, "Renamed", preview.getvalue())
+        template = self.manager.update_template_metadata(
+            template, "Renamed", preview.getvalue()
+        )
         self.assertEqual(
             self.manager.template_metadata(template),
             {"display_name": "Renamed", "preview": "preview.png"},
         )
-        self.assertEqual((template.directory / "config.json").read_bytes(), original)
+        self.assertFalse((self.root / "sample").exists())
+        saved = json.loads((template.directory / "config.json").read_text("utf-8"))
+        previous = json.loads(original)
+        previous["name"] = "Renamed"
+        previous["width"], previous["height"] = 40, 30
+        previous["layers"][0].update(x=4, y=15, w=32, h=15, fontsize=8)
+        self.assertEqual(saved, previous)
+        self.assertEqual(self.manager.load("Renamed").width, 40)
+        self.assertEqual(self.manager.load("Renamed").height, 30)
+        with Image.open(template.directory / "bg.png") as image:
+            self.assertEqual(image.size, (40, 30))
+            self.assertEqual(image.convert("RGB").getpixel((0, 0)), (255, 0, 0))
         with Image.open(template.directory / "preview.png") as image:
             self.assertEqual(image.size, (40, 30))
 
-        self.manager.update_template_metadata(template, "Again", None)
+        template = self.manager.update_template_metadata(template, "Again", None)
         self.assertEqual(
             self.manager.template_metadata(template)["display_name"], "Again"
         )
+        self.assertFalse((self.root / "Renamed").exists())
         with Image.open(template.directory / "preview.png") as image:
+            self.assertEqual(image.size, (40, 30))
+        with Image.open(template.directory / "bg.png") as image:
             self.assertEqual(image.size, (40, 30))
 
     def test_invalid_template_metadata_does_not_replace_existing_values(self) -> None:
@@ -89,10 +109,80 @@ class EditorBackendTests(unittest.TestCase):
         template = self.manager.create_from_image("sample", source, {})
         with self.assertRaisesRegex(TemplateConfigError, "1-64 characters"):
             self.manager.update_template_metadata(template, "  ", None)
-        with self.assertRaisesRegex(TemplateConfigError, "Preview image is invalid"):
+        with self.assertRaisesRegex(TemplateConfigError, "Canvas image is invalid"):
             self.manager.update_template_metadata(template, "Changed", b"not an image")
         self.assertEqual(
             self.manager.template_metadata(template)["display_name"], "sample"
+        )
+
+    def test_upload_to_global_template_from_user_keeps_global_canvas(self) -> None:
+        source = self.root / "source.png"
+        Image.new("RGB", (120, 80), "blue").save(source)
+        global_template = self.manager.create_from_image("shared", source, {})
+        original_config = (global_template.directory / "config.json").read_bytes()
+        image_data = BytesIO()
+        Image.new("RGB", (50, 40), "red").save(image_data, format="PNG")
+
+        user_template = self.manager.update_template_metadata(
+            global_template, "renamed", image_data.getvalue(), "owner"
+        )
+        self.assertEqual(global_template.directory.name, "shared")
+        self.assertEqual(
+            (global_template.directory / "config.json").read_bytes(), original_config
+        )
+        with Image.open(global_template.directory / "bg.png") as image:
+            self.assertEqual(image.convert("RGB").getpixel((0, 0)), (0, 0, 255))
+        self.assertEqual(user_template.directory.name, "renamed")
+        self.assertEqual(user_template.width, 50)
+        self.assertEqual(user_template.height, 40)
+        with Image.open(user_template.directory / "bg.png") as image:
+            self.assertEqual(image.convert("RGB").getpixel((0, 0)), (255, 0, 0))
+
+    def test_config_endpoint_accepts_uploaded_canvas_without_body_argument(
+        self,
+    ) -> None:
+        template = self.manager.create_empty_template("Current")
+        canvas = BytesIO()
+        Image.new("RGB", (320, 180), "green").save(canvas, format="PNG")
+        body = {
+            "action": "update",
+            "template": "Current",
+            "display_name": "Current",
+            "preview": "data:image/png;base64,"
+            + base64.b64encode(canvas.getvalue()).decode("ascii"),
+        }
+
+        with patch.dict(os.environ, {"ASTRBOT_ROOT": str(self.root)}):
+            from astrbot_plugin_customized_invitation.main import (
+                CustomizedInvitationPlugin,
+            )
+
+            plugin = CustomizedInvitationPlugin.__new__(CustomizedInvitationPlugin)
+            plugin.manager = self.manager
+            plugin.state = InvitationState(self.root / "state.json")
+            plugin.upload_dir = self.root / "uploads"
+
+            class RequestStub:
+                async def json(self, default):
+                    return body
+
+            with (
+                patch(
+                    "astrbot_plugin_customized_invitation.main.request", RequestStub()
+                ),
+                patch(
+                    "astrbot_plugin_customized_invitation.main.json_response",
+                    side_effect=lambda payload: payload,
+                ),
+            ):
+                result = asyncio.run(plugin.save_template_config())
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["template"], "Current")
+        updated = self.manager.load("Current")
+        self.assertEqual((updated.width, updated.height), (320, 180))
+        self.assertEqual(
+            self.manager.template_metadata(template)["preview"], "preview.png"
         )
 
     def test_template_binding_updates_upload_task(self) -> None:
@@ -102,6 +192,104 @@ class EditorBackendTests(unittest.TestCase):
         self.assertEqual(state.get_upload_task(token)["template_name"], "new")
         with self.assertRaisesRegex(ValueError, "invalid or expired"):
             state.set_upload_task_template("missing", "new")
+
+    def test_renaming_updates_active_and_task_template_references(self) -> None:
+        state = InvitationState(self.root / "state.json")
+        owner_task = state.create_upload_task("owner", "old")
+        other_task = state.create_upload_task("other", "old")
+        state.set_active_template("owner", "old")
+        state.set_active_template("other", "old")
+        state.rename_template_references("old", "new", "owner")
+        self.assertEqual(state.get_upload_task(owner_task)["template_name"], "new")
+        self.assertEqual(state.get_upload_task(other_task)["template_name"], "old")
+        self.assertEqual(state.get_active_template("owner"), "new")
+        self.assertEqual(state.get_active_template("other"), "old")
+
+    def test_empty_template_uses_name_as_primary_key(self) -> None:
+        template = self.manager.create_empty_template("Invitation")
+        self.assertEqual(template.name, "Invitation")
+        self.assertEqual(template.directory.name, "Invitation")
+        self.assertEqual(template.background_color, "#ffffff")
+        with self.assertRaisesRegex(TemplateConfigError, "already exists"):
+            self.manager.create_empty_template("Invitation")
+
+    def test_new_template_image_replaces_blank_canvas(self) -> None:
+        template = self.manager.create_empty_template("New")
+        canvas = BytesIO()
+        Image.new("RGB", (320, 180), "green").save(canvas, format="PNG")
+        updated = self.manager.update_template_metadata(
+            template, "New", canvas.getvalue()
+        )
+        self.assertEqual((updated.width, updated.height), (320, 180))
+        self.assertEqual(updated.background, "bg.png")
+        with Image.open(updated.directory / "bg.png") as image:
+            self.assertEqual(image.convert("RGB").getpixel((0, 0)), (0, 128, 0))
+
+    def test_rename_rejects_a_name_that_already_exists(self) -> None:
+        first = self.manager.create_empty_template("First")
+        second = self.manager.create_empty_template("Second")
+        with self.assertRaisesRegex(TemplateConfigError, "already exists"):
+            self.manager.update_template_metadata(first, "Second", None)
+        self.assertEqual(self.manager.load("First").name, "First")
+        self.assertEqual(self.manager.load("Second").directory, second.directory)
+
+    def test_updating_existing_layer_preserves_background_and_other_layers(
+        self,
+    ) -> None:
+        template_dir = self.root / "default"
+        template_dir.mkdir()
+        raw = {
+            "name": "default",
+            "width": 1200,
+            "height": 675,
+            "background_color": "#f7f2ea",
+            "layers": [
+                {
+                    "id": "title",
+                    "type": "text",
+                    "field": "title",
+                    "x": 120,
+                    "y": 120,
+                    "w": 960,
+                    "h": 90,
+                    "fontsize": 64,
+                },
+                {
+                    "id": "date",
+                    "type": "text",
+                    "field": "date",
+                    "x": 150,
+                    "y": 460,
+                    "w": 900,
+                    "h": 70,
+                    "fontsize": 42,
+                },
+            ],
+        }
+        (template_dir / "config.json").write_text(json.dumps(raw), encoding="utf-8")
+        updated = self.manager.update_text_layer(
+            "default", {"layer": "title", "x": "130", "default": "Edited"}
+        )
+        saved = json.loads((template_dir / "config.json").read_text(encoding="utf-8"))
+        self.assertEqual(updated.layers[0].x, 130)
+        self.assertEqual(saved["background_color"], "#f7f2ea")
+        self.assertEqual(saved["layers"][1], raw["layers"][1])
+
+    def test_updating_global_layer_for_user_copies_without_changing_global(
+        self,
+    ) -> None:
+        source = self.root / "source.png"
+        Image.new("RGB", (240, 160), "white").save(source)
+        global_template = self.manager.create_from_image("shared", source, {})
+        original = (global_template.directory / "config.json").read_bytes()
+        updated = self.manager.update_user_text_layer(
+            "owner", "shared", {"layer": "name", "x": "80"}
+        )
+        self.assertEqual(updated.layers[0].x, 80)
+        self.assertEqual(
+            (global_template.directory / "config.json").read_bytes(), original
+        )
+        self.assertEqual(self.manager.load_for_user("owner", "shared").layers[0].x, 80)
 
     def test_vertical_orientation_round_trip_and_rendering(self) -> None:
         source = self.root / "source.png"
