@@ -28,6 +28,24 @@ class InvitationState:
         self._save(data)
         return token
 
+    def text_box_reset_done(self) -> bool:
+        """Check whether existing template boxes were cleared.
+
+        Returns:
+            True after the one-time text box reset completes.
+        """
+        return self._load().get("text_box_reset_v1") is True
+
+    def mark_text_box_reset_done(self) -> None:
+        """Record completion of the one-time text box reset.
+
+        Returns:
+            None.
+        """
+        data = self._load()
+        data["text_box_reset_v1"] = True
+        self._save(data)
+
     def get_upload_task(self, token: str) -> dict | None:
         """Get an upload task.
 

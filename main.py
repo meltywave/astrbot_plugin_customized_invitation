@@ -53,6 +53,9 @@ class CustomizedInvitationPlugin(Star):
         Returns:
             None.
         """
+        if not self.state.text_box_reset_done():
+            self.manager.clear_existing_text_boxes()
+            self.state.mark_text_box_reset_done()
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         self.context.register_web_api(
@@ -137,12 +140,18 @@ class CustomizedInvitationPlugin(Star):
                 yield event.plain_result("当前无启用模版。")
                 return
 
+            template = self.manager.load_for_user(owner_key, template_name)
+            box_numbers = sorted(
+                int(layer.field)
+                for layer in template.layers
+                if layer.type == "text" and layer.field.isdigit()
+            )
             request_data = parse_invitation_fields(
                 event.message_str,
                 template_name,
                 INVITATION_COMMANDS,
+                box_numbers if len(box_numbers) == len(template.layers) else None,
             )
-            template = self.manager.load_for_user(owner_key, request_data.template_name)
             image = self.renderer.render(template, request_data.fields)
 
             self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -202,10 +211,31 @@ class CustomizedInvitationPlugin(Star):
                     if task
                     else self.manager.load(template_name)
                 )
-                layer = next(
-                    (item for item in template.layers if item.type == "text"),
-                    None,
-                )
+                layers = [
+                    {
+                        "id": layer.id,
+                        "field": layer.field,
+                        "x": layer.x,
+                        "y": layer.y,
+                        "w": layer.w,
+                        "h": layer.h,
+                        "fontsize": layer.fontsize,
+                        "rotation": layer.rotation,
+                        "color": layer.color,
+                        "font": layer.font or "",
+                        "align": layer.align,
+                        "valign": layer.valign,
+                        "orientation": layer.orientation,
+                        "bold": layer.bold,
+                        "italic": layer.italic,
+                        "underline": layer.underline,
+                        "strikethrough": layer.strikethrough,
+                        "required": layer.required,
+                        "default": layer.default,
+                    }
+                    for layer in template.layers
+                    if layer.type == "text"
+                ]
                 background_data_url = ""
                 if template.background:
                     background_path = template.directory / template.background
@@ -229,25 +259,10 @@ class CustomizedInvitationPlugin(Star):
                     "height": template.height,
                     "background": background_data_url,
                     "background_color": template.background_color,
-                    "layer": {
-                        "x": layer.x if layer else 0,
-                        "id": layer.id if layer else "name",
-                        "y": layer.y if layer else 0,
-                        "w": layer.w if layer else template.width,
-                        "h": layer.h if layer else template.height,
-                        "fontsize": layer.fontsize if layer else 48,
-                        "rotation": layer.rotation if layer else 0,
-                        "color": layer.color if layer else "#000000",
-                        "font": layer.font if layer else "",
-                        "align": layer.align if layer else "center",
-                        "valign": layer.valign if layer else "middle",
-                        "orientation": layer.orientation if layer else "horizontal",
-                        "bold": layer.bold if layer else False,
-                        "italic": layer.italic if layer else False,
-                        "underline": layer.underline if layer else False,
-                        "strikethrough": layer.strikethrough if layer else False,
-                        "default": layer.default if layer else "",
-                    },
+                    "background_rotation": template.background_rotation,
+                    "background_opacity": template.background_opacity,
+                    "layer": layers[0] if layers else None,
+                    "layers": layers,
                 }
             except (OSError, TemplateConfigError) as err:
                 logger.warning(
@@ -459,6 +474,28 @@ class CustomizedInvitationPlugin(Star):
                 return error_response(str(err), status_code=400)
             return json_response({"status": "ok", "template": template.name})
 
+        if body and body.get("save_layers") is True:
+            template_name = str(body.get("template_name") or "").strip()
+            try:
+                background_rotation = int(body.get("background_rotation", 0))
+                background_opacity = float(body.get("background_opacity", 1))
+                if background_rotation % 90 != 0 or not 0 <= background_opacity <= 1:
+                    raise ValueError("Invalid background settings.")
+                template = self.manager.replace_text_layers(
+                    template_name,
+                    body.get("layers"),
+                    str(task["owner_key"]) if task else None,
+                )
+                template = self.manager.update_background_settings(
+                    template_name,
+                    background_rotation,
+                    background_opacity,
+                    str(task["owner_key"]) if task else None,
+                )
+            except (TemplateConfigError, TypeError, ValueError) as err:
+                return error_response(str(err), status_code=400)
+            return json_response({"status": "ok", "template": template.name})
+
         upload_path = self.upload_dir / f"{task_token or uuid4().hex}.upload"
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         if body:
@@ -504,22 +541,26 @@ class CustomizedInvitationPlugin(Star):
             except OSError:
                 logger.warning("Failed to remove temporary upload: %s", upload_path)
 
-        layer = template.layers[0]
+        layer = template.layers[0] if template.layers else None
         return json_response(
             {
                 "status": "ok",
                 "template": template.name,
                 "width": template.width,
                 "height": template.height,
-                "layer": {
-                    "x": layer.x,
-                    "y": layer.y,
-                    "w": layer.w,
-                    "h": layer.h,
-                    "fontsize": layer.fontsize,
-                    "rotation": layer.rotation,
-                    "color": layer.color,
-                },
+                "layer": (
+                    {
+                        "x": layer.x,
+                        "y": layer.y,
+                        "w": layer.w,
+                        "h": layer.h,
+                        "fontsize": layer.fontsize,
+                        "rotation": layer.rotation,
+                        "color": layer.color,
+                    }
+                    if layer
+                    else None
+                ),
             }
         )
 

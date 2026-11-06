@@ -26,6 +26,26 @@ class TemplateManager:
         """
         return self._list_template_dirs(self.templates_dir)
 
+    def clear_existing_text_boxes(self) -> None:
+        """Remove text boxes from all existing global and user templates.
+
+        Returns:
+            None.
+
+        Raises:
+            TemplateConfigError: If a template config cannot be updated.
+        """
+        for config_path in self.templates_dir.rglob("config.json"):
+            if config_path.is_symlink() or not config_path.is_file():
+                continue
+            try:
+                raw = json.loads(config_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
+            if isinstance(raw, dict) and raw.get("layers"):
+                raw["layers"] = []
+                self._write_config(config_path.parent, raw)
+
     def list_user_templates(self, owner_key: str) -> list[str]:
         """List templates owned by one user.
 
@@ -231,17 +251,20 @@ class TemplateManager:
         except (OSError, UnidentifiedImageError) as err:
             raise TemplateConfigError("Uploaded file is not a readable image.") from err
 
-        layer = self._text_layer_from_options(
-            options,
-            default_width=width,
-            default_height=height,
-        )
         raw = {
             "name": safe_name,
             "width": width,
             "height": height,
             "background": "bg.png",
-            "layers": [self._text_layer_to_raw(layer)],
+            "layers": (
+                [
+                    self._text_layer_to_raw(
+                        self._text_layer_from_options(options, width, height)
+                    )
+                ]
+                if options
+                else []
+            ),
         }
         self._write_config(template_dir, raw)
         return self._load_from_dir(template_dir, safe_name)
@@ -319,6 +342,101 @@ class TemplateManager:
         self._write_config(template.directory, raw)
         return self._load_from_dir(template.directory, template.name)
 
+    def replace_text_layers(
+        self, name: str, layers: list[dict[str, Any]], owner_key: str | None = None
+    ) -> TemplateConfig:
+        """Replace a template's ordered text boxes.
+
+        Args:
+            name: Template primary name.
+            layers: Complete ordered list of text box settings.
+            owner_key: User owner key, or None for a global template.
+
+        Returns:
+            Updated template configuration.
+
+        Raises:
+            TemplateConfigError: If a text box is invalid or cannot be saved.
+        """
+        if not isinstance(layers, list):
+            raise TemplateConfigError("Text layers must be a list.")
+        parsed_layers = []
+        layer_ids = set()
+        layer_numbers = set()
+        for index, layer in enumerate(layers):
+            if not isinstance(layer, dict):
+                raise TemplateConfigError(f"Text layer {index + 1} is invalid.")
+            parsed = self._parse_text_layer({**layer, "type": "text"}, index)
+            if parsed.id in layer_ids:
+                raise TemplateConfigError(f"Duplicate text layer ID: {parsed.id}")
+            if not parsed.field.isdigit() or int(parsed.field) < 1:
+                raise TemplateConfigError("Text box field must be a positive number.")
+            if int(parsed.field) in layer_numbers:
+                raise TemplateConfigError(f"Duplicate text box number: {parsed.field}")
+            layer_ids.add(parsed.id)
+            layer_numbers.add(int(parsed.field))
+            parsed_layers.append(self._text_layer_to_raw(parsed))
+
+        template = self.load_for_user(owner_key, name) if owner_key else self.load(name)
+        if owner_key:
+            user_dir = self._owner_dir(owner_key) / self._safe_template_name(name)
+            if template.directory != user_dir:
+                try:
+                    copytree(template.directory, user_dir, dirs_exist_ok=True)
+                except OSError as err:
+                    raise TemplateConfigError(
+                        "Cannot copy template for this user."
+                    ) from err
+                template = self._load_from_dir(user_dir, name)
+        try:
+            raw = json.loads((template.directory / "config.json").read_text("utf-8"))
+        except (json.JSONDecodeError, OSError) as err:
+            raise TemplateConfigError(f"Cannot read template config: {name}") from err
+        raw["layers"] = parsed_layers
+        self._write_config(template.directory, raw)
+        return self._load_from_dir(template.directory, name)
+
+    def update_background_settings(
+        self, name: str, rotation: int, opacity: float, owner_key: str | None = None
+    ) -> TemplateConfig:
+        """Save rotation and opacity for the template image.
+
+        Args:
+            name: Template primary name.
+            rotation: Clockwise rotation in 90 degree increments.
+            opacity: Image opacity between 0 and 1.
+            owner_key: User owner key, or None for a global template.
+
+        Returns:
+            Updated template configuration.
+
+        Raises:
+            TemplateConfigError: If settings are invalid or cannot be saved.
+        """
+        if rotation % 90 != 0:
+            raise TemplateConfigError("background_rotation must be a multiple of 90.")
+        if not 0 <= opacity <= 1:
+            raise TemplateConfigError("background_opacity must be between 0 and 1.")
+        template = self.load_for_user(owner_key, name) if owner_key else self.load(name)
+        if owner_key:
+            user_dir = self._owner_dir(owner_key) / self._safe_template_name(name)
+            if template.directory != user_dir:
+                try:
+                    copytree(template.directory, user_dir, dirs_exist_ok=True)
+                except OSError as err:
+                    raise TemplateConfigError(
+                        "Cannot copy template for this user."
+                    ) from err
+                template = self._load_from_dir(user_dir, name)
+        try:
+            raw = json.loads((template.directory / "config.json").read_text("utf-8"))
+        except (json.JSONDecodeError, OSError) as err:
+            raise TemplateConfigError(f"Cannot read template config: {name}") from err
+        raw["background_rotation"] = rotation % 360
+        raw["background_opacity"] = opacity
+        self._write_config(template.directory, raw)
+        return self._load_from_dir(template.directory, name)
+
     def _parse_config(
         self,
         raw: RawConfig,
@@ -342,10 +460,8 @@ class TemplateManager:
         width = self._positive_int(raw.get("width"), "width")
         height = self._positive_int(raw.get("height"), "height")
         layers_data = raw.get("layers")
-        if not isinstance(layers_data, list) or not layers_data:
-            raise TemplateConfigError(
-                "Template config must contain at least one layer."
-            )
+        if not isinstance(layers_data, list):
+            raise TemplateConfigError("Template layers must be a list.")
 
         layers: list[Layer] = []
         for index, layer_data in enumerate(layers_data):
@@ -362,6 +478,17 @@ class TemplateManager:
             raise TemplateConfigError("background must be a string.")
 
         background_color = str(raw.get("background_color") or "#ffffff")
+        background_rotation = self._int(
+            raw.get("background_rotation", 0), "background_rotation"
+        )
+        if background_rotation % 90 != 0:
+            raise TemplateConfigError("background_rotation must be a multiple of 90.")
+        try:
+            background_opacity = float(raw.get("background_opacity", 1.0))
+        except (TypeError, ValueError) as err:
+            raise TemplateConfigError("background_opacity must be a number.") from err
+        if not 0 <= background_opacity <= 1:
+            raise TemplateConfigError("background_opacity must be between 0 and 1.")
         return TemplateConfig(
             name=name,
             width=width,
@@ -370,6 +497,8 @@ class TemplateManager:
             directory=template_dir,
             background=background,
             background_color=background_color,
+            background_rotation=background_rotation,
+            background_opacity=background_opacity,
         )
 
     def _parse_text_layer(self, raw: dict[str, Any], index: int) -> TextLayer:
@@ -713,9 +842,7 @@ class TemplateManager:
             "width": 960,
             "height": 540,
             "background_color": "#ffffff",
-            "layers": [
-                self._text_layer_to_raw(self._text_layer_from_options({}, 960, 540))
-            ],
+            "layers": [],
         }
         self._write_config(template_dir, raw)
         return self._load_from_dir(template_dir, safe_name)

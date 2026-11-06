@@ -73,7 +73,23 @@ class TemplateRenderer:
                     f"Template background image cannot be read: {template.background}"
                 ) from err
             if image.size != (template.width, template.height):
-                return image.resize((template.width, template.height))
+                image = image.resize((template.width, template.height))
+            if template.background_rotation:
+                image = image.rotate(
+                    -template.background_rotation,
+                    resample=Image.Resampling.BICUBIC,
+                    expand=True,
+                )
+            if template.background_opacity < 1:
+                white = Image.new("RGBA", image.size, "white")
+                white.alpha_composite(
+                    Image.blend(
+                        Image.new("RGBA", image.size, (255, 255, 255, 0)),
+                        image,
+                        template.background_opacity,
+                    )
+                )
+                image = white
             return image
 
         try:

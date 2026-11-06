@@ -66,6 +66,8 @@ class TemplateConfig:
         directory: Template directory.
         background: Optional background image path relative to the template directory.
         background_color: Background color used when no background image exists.
+        background_rotation: Background rotation in 90 degree increments.
+        background_opacity: Background opacity from 0 to 1.
     """
 
     name: str
@@ -75,6 +77,8 @@ class TemplateConfig:
     directory: Path
     background: str | None = None
     background_color: str = "#ffffff"
+    background_rotation: int = 0
+    background_opacity: float = 1.0
 
 
 @dataclass(frozen=True)

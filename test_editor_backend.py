@@ -83,8 +83,8 @@ class EditorBackendTests(unittest.TestCase):
         previous = json.loads(original)
         previous["name"] = "Renamed"
         previous["width"], previous["height"] = 40, 30
-        previous["layers"][0].update(x=4, y=15, w=32, h=15, fontsize=8)
         self.assertEqual(saved, previous)
+        self.assertEqual(saved["layers"], [])
         self.assertEqual(self.manager.load("Renamed").width, 40)
         self.assertEqual(self.manager.load("Renamed").height, 30)
         with Image.open(template.directory / "bg.png") as image:
@@ -378,8 +378,180 @@ class EditorBackendTests(unittest.TestCase):
         self.assertEqual(template.name, "Invitation")
         self.assertEqual(template.directory.name, "Invitation")
         self.assertEqual(template.background_color, "#ffffff")
+        self.assertEqual(template.layers, [])
         with self.assertRaisesRegex(TemplateConfigError, "already exists"):
             self.manager.create_empty_template("Invitation")
+
+    def test_replacing_ordered_text_boxes_supports_add_delete_and_empty(self) -> None:
+        self.manager.create_empty_template("Invitation")
+        layers = [
+            {"id": "text_1", "field": "1", "x": 20, "y": 30, "w": 200, "h": 50},
+            {"id": "text_3", "field": "3", "x": 20, "y": 100, "w": 200, "h": 50},
+        ]
+        updated = self.manager.replace_text_layers("Invitation", layers)
+        self.assertEqual([layer.id for layer in updated.layers], ["text_1", "text_3"])
+        self.assertEqual([layer.field for layer in updated.layers], ["1", "3"])
+
+        updated = self.manager.replace_text_layers("Invitation", layers[1:])
+        self.assertEqual([layer.id for layer in updated.layers], ["text_3"])
+        updated = self.manager.replace_text_layers("Invitation", [])
+        self.assertEqual(updated.layers, [])
+        with self.assertRaisesRegex(TemplateConfigError, "Duplicate text layer ID"):
+            self.manager.replace_text_layers("Invitation", [layers[0], layers[0]])
+        with self.assertRaisesRegex(TemplateConfigError, "Duplicate text box number"):
+            self.manager.replace_text_layers(
+                "Invitation", [layers[0], {**layers[1], "field": "1"}]
+            )
+
+    def test_sparse_box_numbers_map_to_positional_invitation_values(self) -> None:
+        from astrbot_plugin_customized_invitation.utils import parse_invitation_fields
+
+        result = parse_invitation_fields(
+            "/invitation 111 222", "Invitation", {"invitation"}, [1, 3]
+        )
+        self.assertEqual(result.fields, {"1": "111", "3": "222"})
+        with self.assertRaisesRegex(ValueError, "Expected 2 text values, received 1"):
+            parse_invitation_fields(
+                "/invitation 111", "Invitation", {"invitation"}, [1, 3]
+            )
+        with self.assertRaisesRegex(ValueError, "Expected 2 text values, received 3"):
+            parse_invitation_fields(
+                "/invitation 111 222 333", "Invitation", {"invitation"}, [1, 3]
+            )
+
+    def test_invitation_command_accepts_sparse_boxes_and_rejects_wrong_count(
+        self,
+    ) -> None:
+        from astrbot_plugin_customized_invitation.main import CustomizedInvitationPlugin
+
+        self.manager.create_empty_template("Global")
+        self.manager.replace_text_layers(
+            "Global",
+            [
+                {"id": "text_1", "field": "1", "x": 10, "y": 10, "w": 200, "h": 40},
+                {"id": "text_3", "field": "3", "x": 10, "y": 70, "w": 200, "h": 40},
+            ],
+        )
+        plugin = CustomizedInvitationPlugin.__new__(CustomizedInvitationPlugin)
+        plugin.manager = self.manager
+        plugin.state = InvitationState(self.root / "state.json")
+        plugin.state.set_active_template("editor-global", "Global")
+        plugin.renderer = TemplateRenderer(self.root / "fonts")
+        plugin.output_dir = self.root / "outputs"
+
+        class EventStub:
+            def __init__(self, message: str):
+                self.message_str = message
+
+            def plain_result(self, value):
+                return value
+
+            def image_result(self, value):
+                return value
+
+            def track_temporary_local_file(self, value):
+                pass
+
+        async def collect(message: str):
+            return [item async for item in plugin.invitation(EventStub(message))]
+
+        with patch.object(plugin, "_owner_key", return_value="owner"):
+            result = asyncio.run(collect("/invitation 111 222"))
+            missing = asyncio.run(collect("/invitation 111"))
+            extra = asyncio.run(collect("/invitation 111 222 333"))
+        self.assertTrue(Path(result[0]).is_file())
+        self.assertIn("Expected 2 text values, received 1", missing[0])
+        self.assertIn("Expected 2 text values, received 3", extra[0])
+
+    def test_one_time_reset_clears_existing_global_and_user_boxes(self) -> None:
+        self.manager.create_empty_template("Global")
+        self.manager.create_empty_template("Private", "owner")
+        layer = {"id": "text_1", "field": "1", "x": 10, "y": 10, "w": 100, "h": 40}
+        self.manager.replace_text_layers("Global", [layer])
+        self.manager.replace_text_layers("Private", [layer], "owner")
+        self.manager.clear_existing_text_boxes()
+        self.assertEqual(self.manager.load("Global").layers, [])
+        self.assertEqual(self.manager.load_for_user("owner", "Private").layers, [])
+
+    def test_editor_initialization_resets_boxes_only_once(self) -> None:
+        from astrbot_plugin_customized_invitation.main import CustomizedInvitationPlugin
+
+        self.manager.create_empty_template("Global")
+        layer = {"id": "text_1", "field": "1", "x": 10, "y": 10, "w": 100, "h": 40}
+        self.manager.replace_text_layers("Global", [layer])
+        plugin = CustomizedInvitationPlugin.__new__(CustomizedInvitationPlugin)
+        plugin.manager = self.manager
+        plugin.state = InvitationState(self.root / "state.json")
+        plugin.output_dir = self.root / "outputs"
+        plugin.upload_dir = self.root / "uploads"
+
+        class ContextStub:
+            def register_web_api(self, *args):
+                pass
+
+        plugin.context = ContextStub()
+        asyncio.run(plugin.initialize())
+        self.assertTrue(plugin.state.text_box_reset_done())
+        self.assertEqual(self.manager.load("Global").layers, [])
+        self.manager.replace_text_layers("Global", [layer])
+        asyncio.run(plugin.initialize())
+        self.assertEqual(len(self.manager.load("Global").layers), 1)
+
+    def test_save_endpoint_persists_all_boxes_and_image_settings(self) -> None:
+        from astrbot_plugin_customized_invitation.main import CustomizedInvitationPlugin
+
+        self.manager.create_empty_template("Global")
+        plugin = CustomizedInvitationPlugin.__new__(CustomizedInvitationPlugin)
+        plugin.manager = self.manager
+        plugin.state = InvitationState(self.root / "state.json")
+        body = {
+            "template_name": "Global",
+            "save_layers": True,
+            "layers": [
+                {"id": "text_1", "field": "1", "x": 10, "y": 10, "w": 100, "h": 40},
+                {"id": "text_3", "field": "3", "x": 20, "y": 60, "w": 100, "h": 40},
+            ],
+            "background_rotation": 90,
+            "background_opacity": 0.4,
+        }
+
+        class RequestStub:
+            content_type = "application/json"
+            query: dict = {}
+
+            async def json(self, default):
+                return body
+
+        with (
+            patch("astrbot_plugin_customized_invitation.main.request", RequestStub()),
+            patch(
+                "astrbot_plugin_customized_invitation.main.json_response",
+                side_effect=lambda payload: payload,
+            ),
+        ):
+            result = asyncio.run(plugin.save_editor_template())
+
+        self.assertEqual(result["status"], "ok")
+        template = self.manager.load("Global")
+        self.assertEqual([layer.field for layer in template.layers], ["1", "3"])
+        self.assertEqual(template.background_rotation, 90)
+        self.assertEqual(template.background_opacity, 0.4)
+
+    def test_rotated_translucent_image_is_used_in_final_render(self) -> None:
+        source = self.root / "source.png"
+        image = Image.new("RGB", (20, 10), "red")
+        image.paste("blue", (0, 0, 10, 10))
+        image.save(source)
+        self.manager.create_from_image("Image", source, {})
+        template = self.manager.update_background_settings("Image", 90, 0.5)
+        self.assertEqual(template.background_rotation, 90)
+        self.assertEqual(template.background_opacity, 0.5)
+        result = TemplateRenderer(self.root / "fonts").render(template, {})
+        self.assertEqual(result.size, (10, 20))
+        top = result.getpixel((2, 2))[:3]
+        bottom = result.getpixel((2, 17))[:3]
+        self.assertGreater(top[2], top[0])
+        self.assertGreater(bottom[0], bottom[2])
 
     def test_new_template_image_replaces_blank_canvas(self) -> None:
         template = self.manager.create_empty_template("New")
@@ -478,7 +650,9 @@ class EditorBackendTests(unittest.TestCase):
     ) -> None:
         source = self.root / "source.png"
         Image.new("RGB", (240, 160), "white").save(source)
-        global_template = self.manager.create_from_image("shared", source, {})
+        global_template = self.manager.create_from_image(
+            "shared", source, {"field": "name"}
+        )
         original = (global_template.directory / "config.json").read_bytes()
         updated = self.manager.update_user_text_layer(
             "owner", "shared", {"layer": "name", "x": "80"}

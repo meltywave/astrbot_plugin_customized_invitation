@@ -509,6 +509,128 @@
         transform: translateY(-50%);
       }
 
+      .image-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        min-height: 54px;
+        width: max-content;
+        margin: -54px auto 0;
+        padding: 8px 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .image-toolbar.visible { visibility: visible; pointer-events: auto; }
+      .image-toolbar button, .text-delete-button {
+        width: 34px;
+        height: 34px;
+        border-radius: 4px;
+        background: var(--soft);
+        color: var(--accent);
+        font-size: 21px;
+      }
+
+      .image-opacity-control { position: relative; }
+      .image-opacity-popover {
+        position: absolute;
+        z-index: 4;
+        top: calc(100% + 10px);
+        left: 50%;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel);
+        box-shadow: 0 6px 16px rgba(24, 31, 38, 0.12);
+        transform: translateX(-50%);
+      }
+      .image-opacity-popover[hidden] { display: none; }
+      .image-opacity-slider {
+        position: relative;
+        display: flex;
+        align-items: center;
+        width: 136px;
+        height: 20px;
+      }
+      .image-opacity-slider input[type="range"] {
+        position: relative;
+        display: block;
+        width: 100%;
+        height: 20px;
+        min-height: 0;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        appearance: none;
+        background-color: transparent;
+        background-image: linear-gradient(var(--line), var(--line));
+        background-position: center;
+        background-size: calc(100% - 16px) 4px;
+        background-repeat: no-repeat;
+        cursor: pointer;
+      }
+      .image-opacity-slider input:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      .image-opacity-slider input::-webkit-slider-runnable-track {
+        height: 4px;
+        background: transparent;
+      }
+      .image-opacity-slider input::-moz-range-track {
+        height: 4px;
+        background: transparent;
+      }
+      .image-opacity-slider input::-webkit-slider-thumb {
+        box-sizing: border-box;
+        width: 16px;
+        height: 16px;
+        margin-top: -6px;
+        border: 2px solid var(--panel);
+        border-radius: 50%;
+        appearance: none;
+        background: var(--accent);
+        box-shadow: 0 0 0 1px var(--accent);
+      }
+      .image-opacity-slider input::-moz-range-thumb {
+        box-sizing: border-box;
+        width: 16px;
+        height: 16px;
+        border: 2px solid var(--panel);
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 1px var(--accent);
+      }
+      .image-opacity-popover output {
+        min-width: 40px;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .text-delete-button { margin-left: 4px; color: var(--danger); }
+      .box-number {
+        position: absolute;
+        z-index: 2;
+        min-width: 20px;
+        height: 20px;
+        padding: 0 4px;
+        border-radius: 3px;
+        background: #176b87;
+        color: white;
+        font-size: 12px;
+        line-height: 20px;
+        text-align: center;
+        pointer-events: none;
+        transform: translate(-100%, -100%);
+      }
+
       .selection-toolbar {
         display: flex;
         align-items: center;
@@ -901,11 +1023,26 @@
             </div>
           </div>
         </section>
+        <button id="deleteTextBtn" class="text-delete-button" type="button" title="删除文本框" aria-label="删除文本框">×</button>
+        </div>
+        <div class="image-toolbar" id="imageToolbar" role="toolbar" aria-label="图片工具栏" aria-hidden="true">
+          <button id="addTextBtn" type="button" title="添加文本框" aria-label="添加文本框">＋</button>
+          <button id="rotateImageBtn" type="button" title="顺时针旋转90度" aria-label="顺时针旋转90度">↻</button>
+          <div class="image-opacity-control">
+            <button id="imageOpacityBtn" type="button" title="图片透明度" aria-label="图片透明度" aria-controls="imageOpacityPopover" aria-expanded="false">◐</button>
+            <div id="imageOpacityPopover" class="image-opacity-popover" hidden>
+              <div class="image-opacity-slider">
+                <input id="imageOpacityInput" type="range" min="0" max="100" value="100" aria-label="图片透明度" />
+              </div>
+              <output id="imageOpacityValue" for="imageOpacityInput">100%</output>
+            </div>
+          </div>
         </div>
         </div>
         <div class="canvas-wrap">
           <div class="editor-surface" id="editorSurface">
             <canvas id="canvas" width="960" height="540"></canvas>
+            <div id="boxNumbers"></div>
             <div class="alignment-guide" id="alignmentGuide"></div>
             <div class="selection-box" id="selectionBox">
               <span class="selection-handle nw"></span>
@@ -993,6 +1130,15 @@
       const horizontalScroll = document.getElementById("horizontalScroll");
       const horizontalScrollContent = document.getElementById("horizontalScrollContent");
       const selectionToolbar = document.getElementById("selectionToolbar");
+      const imageToolbar = document.getElementById("imageToolbar");
+      const boxNumbers = document.getElementById("boxNumbers");
+      const addTextBtn = document.getElementById("addTextBtn");
+      const deleteTextBtn = document.getElementById("deleteTextBtn");
+      const rotateImageBtn = document.getElementById("rotateImageBtn");
+      const imageOpacityBtn = document.getElementById("imageOpacityBtn");
+      const imageOpacityPopover = document.getElementById("imageOpacityPopover");
+      const imageOpacityInput = document.getElementById("imageOpacityInput");
+      const imageOpacityValue = document.getElementById("imageOpacityValue");
       const editorSurface = document.getElementById("editorSurface");
       const canvasEmptyState = document.getElementById("canvasEmptyState");
       const selectionBox = document.getElementById("selectionBox");
@@ -1088,6 +1234,10 @@
       let fontSize = 48;
       let rotation = 0;
       let selected = false;
+      let selectedIndex = -1;
+      let textBoxes = [];
+      let imageRotation = 0;
+      let imageOpacity = 1;
       let dragMode = "";
       let dragStart = null;
       let history = [];
@@ -1129,6 +1279,47 @@
         return inputs.font.value;
       }
 
+      function captureTextBox() {
+        return {
+          rect: { ...rect }, fontSize, rotation, textAlign, textValign,
+          orientation, textStyles: { ...textStyles }, font: inputs.font.value,
+          color: inputs.color.value, previewText: previewTextInput.value,
+        };
+      }
+
+      function activateTextBox(box) {
+        rect = { ...box.rect };
+        fontSize = box.fontSize;
+        rotation = box.rotation;
+        textAlign = box.textAlign;
+        textValign = box.textValign;
+        orientation = box.orientation;
+        Object.assign(textStyles, box.textStyles);
+        inputs.font.value = box.font;
+        inputs.color.value = box.color;
+        inputs.fontsize.value = Math.round(fontSize);
+        previewTextInput.value = box.previewText;
+        setOrientation(orientation);
+        for (const style of Object.keys(styleButtons)) {
+          styleButtons[style].classList.toggle("active", textStyles[style]);
+          styleButtons[style].setAttribute("aria-pressed", String(textStyles[style]));
+        }
+        setIconControlValue(alignControl, textAlign);
+        setIconControlValue(valignControl, textValign);
+      }
+
+      function selectTextBox(index) {
+        if (selectedIndex >= 0 && textBoxes[selectedIndex]) {
+          textBoxes[selectedIndex] = {
+            ...textBoxes[selectedIndex], ...captureTextBox(),
+          };
+        }
+        selectedIndex = index;
+        if (index >= 0) activateTextBox(textBoxes[index]);
+        selected = true;
+        draw();
+      }
+
       function editorSnapshot() {
         return {
           rect: { ...rect },
@@ -1141,6 +1332,9 @@
           font: inputs.font.value,
           color: inputs.color.value,
           previewText: previewTextInput.value,
+          textBoxes: textBoxes.map((box, index) =>
+            index === selectedIndex ? { ...box, ...captureTextBox() } : box),
+          selectedIndex, imageRotation, imageOpacity,
         };
       }
 
@@ -1170,6 +1364,18 @@
       }
 
       function applyEditorSnapshot(snapshot) {
+        if (snapshot.textBoxes) {
+          const previousImageRotation = imageRotation;
+          textBoxes = snapshot.textBoxes.map((box) => ({ ...box, rect: { ...box.rect } }));
+          selectedIndex = snapshot.selectedIndex;
+          imageRotation = snapshot.imageRotation;
+          imageOpacity = snapshot.imageOpacity;
+          imageOpacityInput.value = Math.round(imageOpacity * 100);
+          imageOpacityValue.textContent = `${imageOpacityInput.value}%`;
+          if (bitmap && previousImageRotation !== imageRotation) {
+            sizeCanvasForRotation();
+          }
+        }
         rect = { ...snapshot.rect };
         fontSize = snapshot.fontSize;
         rotation = snapshot.rotation;
@@ -1216,9 +1422,12 @@
       }
 
       function imageBounds() {
+        const sideways = imageRotation % 180 !== 0;
         return {
-          width: bitmap?.width || Math.max(1, canvas.width / scale),
-          height: bitmap?.height || Math.max(1, canvas.height / scale),
+          width: bitmap ? (sideways ? bitmap.height : bitmap.width)
+            : Math.max(1, canvas.width / scale),
+          height: bitmap ? (sideways ? bitmap.width : bitmap.height)
+            : Math.max(1, canvas.height / scale),
         };
       }
 
@@ -1406,6 +1615,16 @@
         editorSurface.style.width = `${baseDisplayWidth * zoom}px`;
       }
 
+      function sizeCanvasForRotation() {
+        const sideways = imageRotation % 180 !== 0;
+        const width = sideways ? bitmap.height : bitmap.width;
+        const height = sideways ? bitmap.width : bitmap.height;
+        canvas.width = Math.round(width * scale);
+        canvas.height = Math.round(height * scale);
+        baseDisplayWidth = canvas.width;
+        editorSurface.style.width = `${baseDisplayWidth * zoom}px`;
+      }
+
       function drawTextPreview() {
         const layout = textSize();
         const previewFontSize = fontSize * scale;
@@ -1496,17 +1715,59 @@
       }
 
       function draw() {
-        selectionToolbar.classList.toggle("visible", selected);
-        selectionToolbar.setAttribute("aria-hidden", String(!selected));
-        selectionToolbar.inert = !selected;
+        const textSelected = selected && (selectedIndex >= 0 || !editingTemplateId);
+        selectionToolbar.classList.toggle("visible", textSelected);
+        selectionToolbar.setAttribute("aria-hidden", String(!textSelected));
+        selectionToolbar.inert = !textSelected;
+        imageToolbar.classList.toggle("visible", selected && !textSelected);
+        imageToolbar.setAttribute("aria-hidden", String(!selected || textSelected));
+        imageToolbar.inert = !selected || textSelected;
+        if (!selected || textSelected) {
+          imageOpacityPopover.hidden = true;
+          imageOpacityBtn.setAttribute("aria-expanded", "false");
+        }
+        rotateImageBtn.disabled = !bitmap;
+        imageOpacityBtn.disabled = !bitmap;
+        imageOpacityInput.disabled = !bitmap;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
         if (bitmap) {
-          ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+          ctx.save();
+          ctx.globalAlpha = imageOpacity;
+          ctx.translate(canvas.width / 2, canvas.height / 2);
+          ctx.rotate(imageRotation * Math.PI / 180);
+          const sideways = imageRotation % 180 !== 0;
+          ctx.drawImage(bitmap, -(sideways ? canvas.height : canvas.width) / 2,
+            -(sideways ? canvas.width : canvas.height) / 2,
+            sideways ? canvas.height : canvas.width,
+            sideways ? canvas.width : canvas.height);
+          ctx.restore();
         } else {
           ctx.fillStyle = backgroundColor;
           ctx.fillRect(0, 0, canvas.width, canvas.height);
         }
 
+        if (selectedIndex >= 0 && textBoxes[selectedIndex]) {
+          textBoxes[selectedIndex] = { ...textBoxes[selectedIndex], ...captureTextBox() };
+        }
+        const activeBox = selectedIndex >= 0 ? textBoxes[selectedIndex] : null;
+        const originalBox = captureTextBox();
+        if (editingTemplateId) {
+          for (const [index, box] of textBoxes.entries()) {
+            if (index === selectedIndex) continue;
+            activateTextBox(box);
+            const bx = rect.x * scale;
+            const by = rect.y * scale;
+            ctx.save();
+            ctx.translate(bx + rect.w * scale / 2, by + rect.h * scale / 2);
+            ctx.rotate(rotation * Math.PI / 180);
+            ctx.translate(-bx - rect.w * scale / 2, -by - rect.h * scale / 2);
+            drawTextPreview();
+            ctx.restore();
+          }
+          activateTextBox(activeBox || originalBox);
+        }
         const x = rect.x * scale;
         const y = rect.y * scale;
         const w = rect.w * scale;
@@ -1515,8 +1776,21 @@
         ctx.translate(x + w / 2, y + h / 2);
         ctx.rotate((rotation * Math.PI) / 180);
         ctx.translate(-x - w / 2, -y - h / 2);
-        drawTextPreview();
+        if (!editingTemplateId || activeBox) drawTextPreview();
         ctx.restore();
+
+        boxNumbers.replaceChildren();
+        if (editingTemplateId) {
+          const bounds = imageBounds();
+          for (const [index, box] of textBoxes.entries()) {
+            const badge = document.createElement("span");
+            badge.className = "box-number";
+            badge.textContent = String(box.number ?? index + 1);
+            badge.style.left = `${box.rect.x / bounds.width * 100}%`;
+            badge.style.top = `${box.rect.y / bounds.height * 100}%`;
+            boxNumbers.appendChild(badge);
+          }
+        }
 
         const bounds = imageBounds();
         selectionBox.style.left = `${(rect.x / bounds.width) * 100}%`;
@@ -1524,7 +1798,8 @@
         selectionBox.style.width = `${(rect.w / bounds.width) * 100}%`;
         selectionBox.style.height = `${(rect.h / bounds.height) * 100}%`;
         selectionBox.style.transform = `rotate(${rotation}deg)`;
-        selectionBox.classList.toggle("selected", selected);
+        selectionBox.classList.toggle("selected", textSelected);
+        selectionBox.style.visibility = editingTemplateId && !textSelected ? "hidden" : "visible";
         selectionBox.classList.toggle("vertical", orientation === "vertical");
 
         const axis = ((rotation % 180) + 180) % 180;
@@ -1606,9 +1881,31 @@
         currentImageDataUrl = imageDataUrl;
         backgroundColor = detail.background_color || "#ffffff";
         bitmap = nextBitmap;
-        fitCanvas(bitmap?.width || detail.width || canvas.width,
-          bitmap?.height || detail.height || canvas.height);
-        const layer = detail.layer || {};
+        imageRotation = Number(detail.background_rotation) || 0;
+        imageOpacity = Number(detail.background_opacity ?? 1);
+        imageOpacityInput.value = Math.round(imageOpacity * 100);
+        imageOpacityValue.textContent = `${imageOpacityInput.value}%`;
+        const imageWidth = bitmap?.width || detail.width || canvas.width;
+        const imageHeight = bitmap?.height || detail.height || canvas.height;
+        fitCanvas(imageWidth, imageHeight);
+        if (bitmap && imageRotation % 180 !== 0) sizeCanvasForRotation();
+        const layers = detail.layers || (detail.layer ? [detail.layer] : []);
+        textBoxes = layers.map((layer, index) => ({
+          id: layer.id || `text_${index + 1}`,
+          number: Number(layer.field) || Number(String(layer.id || "").match(/\d+$/)?.[0]) || index + 1,
+          rect: { x: Number(layer.x) || 0, y: Number(layer.y) || 0,
+            w: Number(layer.w) || imageWidth, h: Number(layer.h) || imageHeight },
+          fontSize: Math.max(8, Number(layer.fontsize) || 48),
+          rotation: Number(layer.rotation) || 0,
+          textAlign: layer.align || "center", textValign: layer.valign || "middle",
+          orientation: layer.orientation || "horizontal",
+          textStyles: Object.fromEntries(Object.keys(styleButtons).map(
+            (style) => [style, layer[style] === true])),
+          font: layer.font || "", color: layer.color || "#000000",
+          previewText: layer.default || "Name preview",
+        }));
+        selectedIndex = textBoxes.length ? 0 : -1;
+        const layer = layers[0] || {};
         rect = {
           x: Number(layer.x) || 0,
           y: Number(layer.y) || 0,
@@ -1631,7 +1928,7 @@
         setOrientation(layer.orientation || "horizontal");
         setIconControlValue(alignControl, textAlign);
         setIconControlValue(valignControl, textValign);
-        fitTextHeight();
+        if (textBoxes.length) fitTextHeight();
         draw();
         resetHistory();
         updateSaveState();
@@ -2087,7 +2384,19 @@
               editingTemplateId = "";
             }
           }
+          if (!editingTemplateId && Object.keys(templateDetails).length) {
+            const fallback = Object.keys(templateDetails)[0];
+            try {
+              if (await loadTemplateDetail(fallback)) editingTemplateId = fallback;
+            } catch {
+              editingTemplateId = "";
+            }
+          }
           if (!editingTemplateId) {
+            textBoxes = [];
+            selectedIndex = -1;
+            editorSurface.style.display = "none";
+            canvasEmptyState.hidden = false;
             ++templateLoadSequence;
             bitmap = null;
             imageFile = null;
@@ -2177,6 +2486,57 @@
 
       undoBtn.addEventListener("click", undo);
       redoBtn.addEventListener("click", redo);
+      addTextBtn.addEventListener("click", () => {
+        if (!editingTemplateId) return;
+        const used = new Set(textBoxes.map((box) => box.number));
+        let number = 1;
+        while (used.has(number)) number += 1;
+        const bounds = imageBounds();
+        const width = Math.min(bounds.width * 0.8, 500);
+        const height = Math.min(bounds.height * 0.15, 96);
+        const box = {
+          id: `text_${number}`, number,
+          rect: { x: (bounds.width - width) / 2,
+            y: (bounds.height - height) / 2, w: width, h: height },
+          fontSize: 48, rotation: 0, textAlign: "center", textValign: "middle",
+          orientation: "horizontal",
+          textStyles: { bold: false, italic: false, underline: false, strikethrough: false },
+          font: "", color: "#000000", previewText: "Name preview",
+        };
+        const insertAt = textBoxes.findIndex((item) => item.number > number);
+        const index = insertAt < 0 ? textBoxes.length : insertAt;
+        textBoxes.splice(index, 0, box);
+        selectTextBox(index);
+        fitTextHeight();
+        draw();
+        recordHistory();
+      });
+      deleteTextBtn.addEventListener("click", () => {
+        if (selectedIndex < 0 || !editingTemplateId) return;
+        textBoxes.splice(selectedIndex, 1);
+        selectedIndex = -1;
+        selected = true;
+        draw();
+        recordHistory();
+      });
+      rotateImageBtn.addEventListener("click", () => {
+        if (!bitmap) return;
+        imageRotation = (imageRotation + 90) % 360;
+        sizeCanvasForRotation();
+        draw();
+        recordHistory();
+      });
+      imageOpacityBtn.addEventListener("click", () => {
+        if (!bitmap) return;
+        imageOpacityPopover.hidden = !imageOpacityPopover.hidden;
+        imageOpacityBtn.setAttribute("aria-expanded", String(!imageOpacityPopover.hidden));
+      });
+      imageOpacityInput.addEventListener("input", () => {
+        imageOpacity = Number(imageOpacityInput.value) / 100;
+        imageOpacityValue.textContent = `${imageOpacityInput.value}%`;
+        draw();
+        recordHistory();
+      });
 
       inputs.fontsize.addEventListener("input", () => {
         fontSize = Math.max(8, Number(inputs.fontsize.value) || 48);
@@ -2331,8 +2691,47 @@
         return ["ew-resize", "nwse-resize", "ns-resize", "nesw-resize"][index];
       }
 
+      function boxAt(point) {
+        for (let index = textBoxes.length - 1; index >= 0; index -= 1) {
+          const box = textBoxes[index];
+          const centerX = box.rect.x + box.rect.w / 2;
+          const centerY = box.rect.y + box.rect.h / 2;
+          const angle = -box.rotation * Math.PI / 180;
+          const dx = point.x - centerX;
+          const dy = point.y - centerY;
+          const localX = dx * Math.cos(angle) - dy * Math.sin(angle) + centerX;
+          const localY = dx * Math.sin(angle) + dy * Math.cos(angle) + centerY;
+          if (localX >= box.rect.x && localX <= box.rect.x + box.rect.w &&
+              localY >= box.rect.y && localY <= box.rect.y + box.rect.h) {
+            return index;
+          }
+        }
+        return -1;
+      }
+
       canvasWrap.addEventListener("pointerdown", (event) => {
         const point = canvasPoint(event);
+        if (editingTemplateId) {
+          const hit = boxAt(point);
+          if (hit >= 0 && hit !== selectedIndex) selectTextBox(hit);
+          if (hit < 0 && selectedIndex < 0) {
+            const bounds = imageBounds();
+            selected = point.x >= 0 && point.x <= bounds.width &&
+              point.y >= 0 && point.y <= bounds.height;
+            draw();
+            return;
+          }
+          if (hit < 0 && selectedIndex >= 0 && !handleAt(point)) {
+            if (point.x >= 0 && point.x <= imageBounds().width &&
+                point.y >= 0 && point.y <= imageBounds().height) {
+              selectTextBox(-1);
+            } else {
+              selected = false;
+              draw();
+            }
+            return;
+          }
+        }
         const handle = handleAt(point);
         if (handle) {
           dragMode = handle;
@@ -2352,10 +2751,11 @@
       canvasWrap.addEventListener("pointermove", (event) => {
         if (!dragMode || !dragStart) {
           const point = canvasPoint(event);
-          const handle = handleAt(point);
+          const handle = selectedIndex >= 0 || !editingTemplateId ? handleAt(point) : "";
           canvasWrap.style.cursor = handle
             ? cursorForHandle(handle)
-            : inRect(point) ? "move" : "default";
+            : editingTemplateId ? (boxAt(point) >= 0 ? "move" : "default")
+              : inRect(point) ? "move" : "default";
           return;
         }
         const point = canvasPoint(event);
@@ -2412,7 +2812,8 @@
       canvasWrap.addEventListener("pointercancel", endDrag);
 
       window.addEventListener("keydown", (event) => {
-        if (!selected || dragMode || event.altKey || event.ctrlKey || event.metaKey ||
+        if (!selected || (editingTemplateId && selectedIndex < 0) || dragMode ||
+            event.altKey || event.ctrlKey || event.metaKey ||
             event.target?.closest("input, textarea, select, button, [contenteditable]")) {
           return;
         }
@@ -2460,8 +2861,21 @@
         }
         payload.template_name = currentTemplateName();
         if (existing) {
-          payload.save_layer = true;
-          payload.layer = existing.layer?.id || "name";
+          if (selectedIndex >= 0 && textBoxes[selectedIndex]) {
+            textBoxes[selectedIndex] = { ...textBoxes[selectedIndex], ...captureTextBox() };
+          }
+          payload.save_layers = true;
+          payload.background_rotation = imageRotation;
+          payload.background_opacity = imageOpacity;
+          payload.layers = textBoxes.map((box) => ({
+            id: box.id, field: String(box.number), type: "text",
+            x: Math.round(box.rect.x), y: Math.round(box.rect.y),
+            w: Math.round(box.rect.w), h: Math.round(box.rect.h),
+            fontsize: Math.round(box.fontSize), rotation: Math.round(box.rotation),
+            color: box.color, font: box.font, align: box.textAlign,
+            valign: box.textValign, orientation: box.orientation,
+            ...box.textStyles, default: box.previewText, required: true,
+          }));
         } else {
           payload.image = imageFile
             ? await readFileAsDataUrl(imageFile)
@@ -2492,17 +2906,10 @@
             throw new Error(data.message || "Failed to save template.");
           }
           if (existing) {
-            existing.layer = {
-              ...existing.layer,
-              x: Math.round(rect.x), y: Math.round(rect.y),
-              w: Math.round(rect.w), h: Math.round(rect.h),
-              fontsize: Math.round(fontSize), rotation: Math.round(rotation),
-              color: payload.color, align: textAlign, valign: textValign,
-              orientation, bold: textStyles.bold, italic: textStyles.italic,
-              underline: textStyles.underline,
-              strikethrough: textStyles.strikethrough,
-              default: previewTextInput.value, font: currentFontValue(),
-            };
+            existing.layers = payload.layers;
+            existing.layer = payload.layers[0] || null;
+            existing.background_rotation = imageRotation;
+            existing.background_opacity = imageOpacity;
           }
           setStatus("已保存", "ok");
           saveNoticeTimer = setTimeout(() => {

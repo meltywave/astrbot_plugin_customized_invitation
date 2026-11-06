@@ -151,6 +151,7 @@ function createEditor(
   let nextTimer = 0;
   element("drawerOverlay").hidden = true;
   element("deleteConfirmOverlay").hidden = true;
+  element("imageOpacityPopover").hidden = true;
   element("canvasEmptyState").hidden = true;
   const windowListeners = new Map();
   const window = {
@@ -392,6 +393,134 @@ test("an empty template list shows an empty state instead of a blank canvas", as
   assert.equal(editor.element("editorSurface").style.display, "none");
   assert.equal(editor.element("canvasEmptyState").hidden, false);
   assert.equal(editor.element("saveBtn").disabled, true);
+});
+
+test("an empty template selects its image and keeps the text toolbar hidden", async () => {
+  const editor = createEditor({
+    templates: { blank: { width: 960, height: 540, layers: [] } },
+    current: "blank",
+  });
+  await new Promise(setImmediate);
+  editor.pointer("pointerdown", 480, 270);
+  assert.equal(editor.element("imageToolbar").classList.contains("visible"), true);
+  assert.equal(editor.element("selectionToolbar").classList.contains("visible"), false);
+  assert.equal(editor.evaluate("textBoxes.length"), 0);
+});
+
+test("text box numbers remain stable after deletion and reuse the first gap", async () => {
+  const editor = createEditor({
+    templates: { blank: { width: 960, height: 540, layers: [] } },
+    current: "blank",
+  });
+  await new Promise(setImmediate);
+  editor.pointer("pointerdown", 480, 270);
+  editor.element("addTextBtn").dispatch("click");
+  assert.equal(editor.evaluate("textBoxes[0].number"), 1);
+  assert.equal(editor.element("selectionToolbar").classList.contains("visible"), true);
+  editor.evaluate("selectTextBox(-1)");
+  editor.element("addTextBtn").dispatch("click");
+  assert.equal(editor.evaluate("textBoxes[1].number"), 2);
+  editor.evaluate("selectTextBox(0)");
+  editor.element("deleteTextBtn").dispatch("click");
+  assert.equal(editor.evaluate("textBoxes[0].number"), 2);
+  editor.element("addTextBtn").dispatch("click");
+  assert.deepEqual(Array.from(editor.evaluate("textBoxes.map((box) => box.number)")), [1, 2]);
+  assert.equal(editor.element("boxNumbers").children[0].textContent, "1");
+  await editor.element("saveBtn").dispatch("click");
+  assert.deepEqual(Array.from(editor.saved[0].layers, (layer) => layer.field), ["1", "2"]);
+});
+
+test("image rotation and opacity are saved and keep text boxes separate", async () => {
+  const editor = createEditor({
+    templates: {
+      image: { width: 320, height: 180, background: "data:image/png;base64,AA==",
+        layers: [], background_rotation: 0, background_opacity: 1 },
+    },
+    current: "image",
+  }, async () => ({ blob: async () => ({ width: 320, height: 180 }) }));
+  await new Promise(setImmediate);
+  editor.pointer("pointerdown", 480, 270);
+  assert.equal(editor.element("imageOpacityPopover").hidden, true);
+  editor.element("imageOpacityBtn").dispatch("click");
+  assert.equal(editor.element("imageOpacityPopover").hidden, false);
+  assert.equal(editor.element("imageOpacityBtn").getAttribute("aria-expanded"), "true");
+  editor.element("rotateImageBtn").dispatch("click");
+  assert.equal(editor.evaluate("imageRotation"), 90);
+  assert.ok(editor.canvas.height > editor.canvas.width);
+  editor.element("undoBtn").dispatch("click");
+  assert.equal(editor.evaluate("imageRotation"), 0);
+  assert.ok(editor.canvas.width > editor.canvas.height);
+  editor.element("redoBtn").dispatch("click");
+  assert.equal(editor.evaluate("imageRotation"), 90);
+  assert.ok(editor.canvas.height > editor.canvas.width);
+  editor.element("imageOpacityInput").value = "0";
+  editor.element("imageOpacityInput").dispatch("input");
+  assert.equal(editor.evaluate("imageOpacity"), 0);
+  assert.equal(editor.element("imageOpacityValue").textContent, "0%");
+  editor.element("imageOpacityInput").value = "100";
+  editor.element("imageOpacityInput").dispatch("input");
+  assert.equal(editor.evaluate("imageOpacity"), 1);
+  assert.equal(editor.element("imageOpacityValue").textContent, "100%");
+  editor.element("imageOpacityInput").value = "40";
+  editor.element("imageOpacityInput").dispatch("input");
+  await editor.element("saveBtn").dispatch("click");
+  assert.equal(editor.saved[0].background_rotation, 90);
+  assert.equal(editor.saved[0].background_opacity, 0.4);
+  assert.deepEqual(Array.from(editor.saved[0].layers), []);
+  editor.element("imageOpacityBtn").dispatch("click");
+  assert.equal(editor.element("imageOpacityPopover").hidden, true);
+});
+
+test("rotating a large image preserves its displayed scale", async () => {
+  const editor = createEditor({
+    templates: { image: { width: 1800, height: 900,
+      background: "data:image/png;base64,AA==", layers: [] } },
+    current: "image",
+  }, async () => ({ blob: async () => ({ width: 1800, height: 900 }) }));
+  await new Promise(setImmediate);
+  const width = editor.canvas.width;
+  const height = editor.canvas.height;
+  const scale = editor.evaluate("scale");
+  editor.pointer("pointerdown", 480, 270);
+  editor.element("rotateImageBtn").dispatch("click");
+  assert.equal(editor.evaluate("scale"), scale);
+  assert.equal(editor.canvas.width, height);
+  assert.equal(editor.canvas.height, width);
+  editor.element("undoBtn").dispatch("click");
+  assert.equal(editor.canvas.width, width);
+  assert.equal(editor.canvas.height, height);
+  editor.element("redoBtn").dispatch("click");
+  assert.equal(editor.canvas.width, height);
+  assert.equal(editor.canvas.height, width);
+});
+
+test("clicking different boxes edits and saves each numbered text", async () => {
+  const editor = createEditor({
+    templates: { multi: { width: 960, height: 540, layers: [
+      { id: "text_1", field: "1", x: 100, y: 100, w: 200, h: 80 },
+      { id: "text_3", field: "3", x: 400, y: 300, w: 200, h: 80 },
+    ] } },
+    current: "multi",
+  });
+  await new Promise(setImmediate);
+  editor.pointer("pointerdown", 180, 140);
+  editor.pointer("pointerup", 180, 140);
+  editor.element("previewTextInput").value = "First";
+  editor.element("previewTextInput").dispatch("input");
+  editor.pointer("pointerdown", 480, 340);
+  editor.pointer("pointerup", 480, 340);
+  editor.element("previewTextInput").value = "Third";
+  editor.element("previewTextInput").dispatch("input");
+  await editor.element("saveBtn").dispatch("click");
+  assert.deepEqual(Array.from(editor.saved[0].layers,
+    (layer) => [layer.field, layer.default]), [["1", "First"], ["3", "Third"]]);
+  editor.pointer("pointerdown", 800, 450);
+  assert.equal(editor.element("imageToolbar").classList.contains("visible"), true);
+  const before = editor.state().x;
+  editor.keydown("ArrowRight");
+  assert.equal(editor.state().x, before);
+  editor.pointer("pointerdown", -10, -10);
+  assert.equal(editor.element("imageToolbar").classList.contains("visible"), false);
 });
 
 test("canvas save briefly shows a short success notice", async () => {
@@ -804,10 +933,10 @@ test("a template without an uploaded image can be edited and saved", async () =>
   editor.element("previewTextInput").dispatch("input");
   await editor.element("saveBtn").dispatch("click");
   assert.equal(editor.saved[0].template_name, "default");
-  assert.equal(editor.saved[0].save_layer, true);
-  assert.equal(editor.saved[0].layer, "title");
+  assert.equal(editor.saved[0].save_layers, true);
+  assert.equal(editor.saved[0].layers[0].id, "title");
   assert.equal(editor.saved[0].image, undefined);
-  assert.equal(editor.saved[0].default, "Edited");
+  assert.equal(editor.saved[0].layers[0].default, "Edited");
 });
 
 test("a slow earlier template load cannot replace a newer card selection", async () => {
@@ -1096,7 +1225,7 @@ test("prefill text replaces the canvas preview as it is typed", () => {
 });
 
 test("formatting toolbar uses one row of functional groups", () => {
-  const toolbar = html.match(/<div class="selection-toolbar"[\s\S]*?<div class="canvas-wrap">/)?.[0];
+  const toolbar = html.match(/<div class="selection-toolbar"[\s\S]*?<div class="image-toolbar"/)?.[0];
   assert.match(html, /\.selection-toolbar\s*\{[^}]*flex-wrap: nowrap;/);
   assert.match(html, /@media \(max-width: 900px\)\s*\{\s*\.selection-toolbar\s*\{\s*height: 70px;/);
   assert.match(html, /\.format-group\s*\{[^}]*border-right: 1px solid var\(--line\);/);

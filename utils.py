@@ -7,6 +7,7 @@ def parse_invitation_fields(
     message: str,
     template_name: str,
     command_names: set[str] | None = None,
+    box_numbers: list[int] | None = None,
 ) -> InvitationRequest:
     """Parse invitation content arguments.
 
@@ -14,17 +15,28 @@ def parse_invitation_fields(
         message: Raw message text.
         template_name: Selected template name.
         command_names: Command names that should be removed from the message.
+        box_numbers: Numbered text boxes in ascending order, when strict mapping is used.
 
     Returns:
         Parsed invitation request.
 
     Raises:
-        ValueError: If no usable content is provided.
+        ValueError: If no usable content is provided or the value count is wrong.
     """
     tokens = shlex.split(message)
     command_names = command_names or {"invitation"}
     if tokens and tokens[0].lstrip("/").lower() in command_names:
         tokens = tokens[1:]
+
+    if box_numbers is not None:
+        if len(tokens) != len(box_numbers):
+            raise ValueError(
+                f"Expected {len(box_numbers)} text values, received {len(tokens)}."
+            )
+        return InvitationRequest(
+            template_name=template_name,
+            fields={str(number): value for number, value in zip(box_numbers, tokens)},
+        )
 
     fields: dict[str, str] = {}
     positional: list[str] = []
