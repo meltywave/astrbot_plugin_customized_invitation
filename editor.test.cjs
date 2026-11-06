@@ -170,9 +170,7 @@ function createEditor(
       ready: async () => {},
       apiGet: async (endpoint) => {
         listRequests.push(endpoint);
-        const response = { ...templateData };
-        templateData.first_visit = false;
-        return response;
+        return templateData;
       },
       apiPost: async (endpoint, payload) => {
         if ((endpoint === "editor/template-config" && payload.action === "delete") ||
@@ -344,19 +342,18 @@ test("top bar shows template configuration and keeps canvas save separate", asyn
   assert.doesNotMatch(html, /id="(?:newTemplateBtn|existingTemplateBtn|templateSelect|templateNameInput|imageInput)"/);
 });
 
-test("first visit shows the sample without changing the active template", async () => {
+test("first visit shows the active template even when a sample exists", async () => {
   const data = {
     templates: {
       other: { display_name: "Other", layer: { x: 10 } },
       sample: { display_name: "样例", layer: { x: 200 } },
     },
     current: "other",
-    first_visit: true,
   };
   const first = createEditor(data);
   assert.match(html, /\.editor-surface\s*\{[^}]*visibility: hidden;/);
   await new Promise(setImmediate);
-  assert.equal(first.evaluate("currentTemplateName()"), "sample");
+  assert.equal(first.evaluate("currentTemplateName()"), "other");
   assert.equal(first.evaluate("boundTemplateId"), "other");
   assert.equal(first.element("editorSurface").style.visibility, "visible");
   assert.equal(first.element("editorSurface").style.display, "");
@@ -368,18 +365,17 @@ test("first visit shows the sample without changing the active template", async 
   assert.equal(next.evaluate("boundTemplateId"), "other");
 });
 
-test("later visits show the first listed template when none is active", async () => {
+test("first and later visits show the first listed template when none is active", async () => {
   const data = {
     templates: {
       first: { display_name: "First", layer: { x: 20 } },
       "样例": { display_name: "样例", layer: { x: 200 } },
     },
     current: "",
-    first_visit: true,
   };
   const first = createEditor(data);
   await new Promise(setImmediate);
-  assert.equal(first.evaluate("currentTemplateName()"), "样例");
+  assert.equal(first.evaluate("currentTemplateName()"), "first");
   assert.equal(first.evaluate("boundTemplateId"), "");
 
   const next = createEditor(data);
@@ -394,6 +390,11 @@ test("an empty template list shows an empty state instead of a blank canvas", as
   assert.equal(editor.element("editorSurface").style.visibility, undefined);
   assert.equal(editor.element("editorSurface").style.display, "none");
   assert.equal(editor.element("canvasEmptyState").hidden, false);
+  assert.equal(editor.element("canvasEmptyState").textContent, "请在模版配置中添加模版");
+  assert.equal(editor.element("saveBtn").disabled, true);
+  editor.pointer("pointerdown", 480, 270);
+  assert.equal(editor.element("selectionToolbar").classList.contains("visible"), false);
+  assert.equal(editor.element("imageToolbar").classList.contains("visible"), false);
   assert.equal(editor.element("saveBtn").disabled, true);
 });
 
@@ -982,6 +983,8 @@ test("confirmed deletion clears the active template and leaves the drawer open",
   assert.equal(editor.element("deleteConfirmOverlay").hidden, true);
   assert.equal(editor.element("drawerOverlay").hidden, false);
   assert.equal(editor.element("templateGrid").children.length, 1);
+  assert.match(editor.element("templateGrid").children[0].className, /create/);
+  assert.equal(editor.element("templateConfigBtn").getAttribute("aria-expanded"), "true");
   assert.equal(editor.element("drawerDeleteBtn").disabled, true);
   assert.equal(editor.evaluate("boundTemplateId"), "");
   assert.equal(editor.evaluate("currentTemplateName()"), "");
@@ -990,6 +993,12 @@ test("confirmed deletion clears the active template and leaves the drawer open",
   await new Promise(setImmediate);
   assert.equal(editor.element("drawerOverlay").hidden, true);
   assert.equal(editor.evaluate("currentTemplateName()"), "");
+  assert.equal(editor.element("canvasEmptyState").hidden, false);
+  assert.equal(editor.element("canvasEmptyState").textContent, "请在模版配置中添加模版");
+  editor.pointer("pointerdown", 480, 270);
+  assert.equal(editor.element("selectionToolbar").classList.contains("visible"), false);
+  assert.equal(editor.element("imageToolbar").classList.contains("visible"), false);
+  assert.equal(editor.element("saveBtn").disabled, true);
   assert.equal(editor.evaluate("hasUnsavedCanvasChanges()"), false);
 });
 
@@ -2036,7 +2045,13 @@ test("all corners scale around their opposite corner", () => {
 });
 
 test("rotation handle supports clockwise and counterclockwise drags", async () => {
-  const editor = createEditor();
+  const editor = createEditor({
+    templates: { turned: { layers: [
+      { id: "text_1", field: "1", x: 96, y: 220, w: 768, h: 96 },
+    ] } },
+    current: "turned",
+  });
+  await new Promise(setImmediate);
   const before = editor.state();
   const centerX = before.x + before.w / 2;
   const centerY = before.y + before.h / 2;

@@ -1077,7 +1077,7 @@
             </div>
             <span class="rotation-angle" id="rotationAngle"></span>
           </div>
-          <div id="canvasEmptyState" class="canvas-empty-state" hidden>暂无可用模版</div>
+          <div id="canvasEmptyState" class="canvas-empty-state" hidden>请在模版配置中添加模版</div>
         </div>
         <div class="horizontal-scroll" id="horizontalScroll" aria-label="画布水平滚动">
           <div class="horizontal-scroll-content" id="horizontalScrollContent"></div>
@@ -1775,13 +1775,15 @@
       }
 
       function draw() {
-        const textSelected = selected && (selectedIndex >= 0 || !editingTemplateId);
+        const textSelected = selected && canvasEmptyState.hidden &&
+          (selectedIndex >= 0 || !editingTemplateId);
         selectionToolbar.classList.toggle("visible", textSelected);
         selectionToolbar.setAttribute("aria-hidden", String(!textSelected));
         selectionToolbar.inert = !textSelected;
-        imageToolbar.classList.toggle("visible", selected && !textSelected);
-        imageToolbar.setAttribute("aria-hidden", String(!selected || textSelected));
-        imageToolbar.inert = !selected || textSelected;
+        const imageSelected = selected && canvasEmptyState.hidden && !textSelected;
+        imageToolbar.classList.toggle("visible", imageSelected);
+        imageToolbar.setAttribute("aria-hidden", String(!imageSelected));
+        imageToolbar.inert = !imageSelected;
         if (!selected || textSelected) {
           imageOpacityPopover.hidden = true;
           imageOpacityBtn.setAttribute("aria-expanded", "false");
@@ -2159,7 +2161,7 @@
         });
       }
 
-      async function loadTemplates(preferredTemplateId = "", initialLoad = false) {
+      async function loadTemplates(preferredTemplateId = "") {
         try {
           const data = await pluginApiGet("editor/templates", { task });
           if (data.status === "error") {
@@ -2168,22 +2170,31 @@
           templateDetails = data.templates || {};
           const currentName = data.current || (task ? initialTemplateName : "");
           boundTemplateId = templateDetails[currentName] ? currentName : "";
-          const firstVisit = initialLoad && data.first_visit === true;
-          const sampleId = Object.keys(templateDetails).find((name) =>
-            name === "样例" || templateDetails[name].display_name === "样例");
           editingTemplateId = templateDetails[preferredTemplateId]
             ? preferredTemplateId
-            : (firstVisit && sampleId) || boundTemplateId ||
-              (templateDetails[initialTemplateName] ? initialTemplateName : "") ||
+            : boundTemplateId ||
+              (task && templateDetails[initialTemplateName] ? initialTemplateName : "") ||
               Object.keys(templateDetails)[0] || "";
           if (editingTemplateId) {
             if (!(await loadTemplateDetail(editingTemplateId))) return false;
             editorSurface.style.display = "";
             editorSurface.style.visibility = "visible";
             canvasEmptyState.hidden = true;
+            draw();
           } else {
+            selected = false;
+            selectedIndex = -1;
+            textBoxes = [];
+            bitmap = null;
+            imageFile = null;
+            currentImageDataUrl = "";
+            savedCanvasSignature = null;
+            savedCanvasTemplateId = "";
             editorSurface.style.display = "none";
+            canvasEmptyState.textContent = "请在模版配置中添加模版";
             canvasEmptyState.hidden = false;
+            draw();
+            resetHistory();
           }
           updateSaveState();
           return true;
@@ -2529,6 +2540,7 @@
             savedCanvasSignature = null;
             savedCanvasTemplateId = "";
             editorSurface.style.display = "none";
+            canvasEmptyState.textContent = "请在模版配置中添加模版";
             canvasEmptyState.hidden = false;
             ++templateLoadSequence;
             bitmap = null;
@@ -2846,6 +2858,7 @@
       }
 
       canvasWrap.addEventListener("pointerdown", (event) => {
+        if (!editingTemplateId && !canvasEmptyState.hidden) return;
         const point = canvasPoint(event);
         if (editingTemplateId) {
           const hit = boxAt(point);
@@ -3072,7 +3085,7 @@
       fitTextHeight();
       draw();
       resetHistory();
-      loadTemplates("", true);
+      loadTemplates();
     </script>
   </body>
 </html>

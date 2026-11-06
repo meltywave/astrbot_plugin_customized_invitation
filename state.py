@@ -98,19 +98,6 @@ class InvitationState:
         value = self._load().get("active_templates", {}).get(owner_key)
         return value if isinstance(value, str) and value.strip() else None
 
-    def claim_first_editor_visit(self) -> bool:
-        """Record the first visit to the global editor.
-
-        Returns:
-            True only when this is the first recorded visit.
-        """
-        data = self._load()
-        if data.get("editor_opened") is True:
-            return False
-        data["editor_opened"] = True
-        self._save(data)
-        return True
-
     def get_effective_template(self, owner_key: str) -> str | None:
         """Resolve a user's template while honoring an explicit global disable.
 

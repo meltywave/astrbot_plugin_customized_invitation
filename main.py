@@ -271,15 +271,6 @@ class CustomizedInvitationPlugin(Star):
         return json_response(
             {
                 "status": "ok",
-                "first_visit": (
-                    self.state.claim_first_editor_visit()
-                    if not task
-                    and any(
-                        name == "样例" or detail["display_name"] == "样例"
-                        for name, detail in template_details.items()
-                    )
-                    else False
-                ),
                 "current": (
                     str(task["template_name"])
                     if task
