@@ -215,6 +215,26 @@
       .delete-confirm-actions button { padding: 0 14px; }
       .confirm-delete-btn { background: var(--danger); }
 
+      .unsaved-confirm-heading { display: flex; align-items: center; justify-content: space-between; }
+      .unsaved-confirm-heading h2 { margin: 0; }
+      .unsaved-confirm-actions { display: flex; justify-content: space-between; gap: 8px; margin-top: 20px; }
+      .unsaved-confirm-actions button { padding: 0 14px; }
+
+      .drawer-saved-toast {
+        position: absolute;
+        z-index: 2;
+        top: 70px;
+        left: 50%;
+        padding: 8px 18px;
+        border-radius: 6px;
+        background: var(--ok);
+        color: #ffffff;
+        box-shadow: 0 4px 12px rgba(24, 31, 38, 0.18);
+        white-space: nowrap;
+        transform: translateX(-50%);
+      }
+      .drawer-saved-toast[hidden] { display: none; }
+
       .drawer-close {
         width: 32px;
         min-height: 32px;
@@ -1075,6 +1095,7 @@
           <h2 id="drawerTitle">模版配置</h2>
           <button id="drawerCloseBtn" class="drawer-close" type="button" title="关闭" aria-label="关闭">×</button>
         </div>
+        <div id="drawerSavedToast" class="drawer-saved-toast" role="status" aria-live="polite" hidden>已保存</div>
         <div class="drawer-list">
           <div id="templateGrid" class="template-grid"></div>
         </div>
@@ -1094,6 +1115,21 @@
           <button id="drawerDeleteBtn" class="drawer-delete-btn" type="button" disabled>删除</button>
         </div>
       </aside>
+    </div>
+
+    <div id="unsavedConfirmOverlay" class="delete-confirm-overlay" hidden>
+      <div class="delete-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="unsavedConfirmTitle" aria-describedby="unsavedConfirmMessage">
+        <div class="unsaved-confirm-heading">
+          <h2 id="unsavedConfirmTitle">未保存的模版编辑</h2>
+          <button id="unsavedConfirmCloseBtn" class="drawer-close" type="button" title="取消" aria-label="取消">×</button>
+        </div>
+        <p id="unsavedConfirmMessage">是否对模版编辑进行保存？</p>
+        <div id="unsavedConfirmError" class="drawer-error" role="alert"></div>
+        <div class="unsaved-confirm-actions">
+          <button id="unsavedConfirmSaveBtn" type="button">保存</button>
+          <button id="unsavedConfirmDiscardBtn" class="cancel-button" type="button">放弃</button>
+        </div>
+      </div>
     </div>
 
     <div id="deleteConfirmOverlay" class="delete-confirm-overlay" hidden>
@@ -1155,6 +1191,12 @@
       const drawerCloseBtn = document.getElementById("drawerCloseBtn");
       const drawerConfirmBtn = document.getElementById("drawerConfirmBtn");
       const drawerDeleteBtn = document.getElementById("drawerDeleteBtn");
+      const drawerSavedToast = document.getElementById("drawerSavedToast");
+      const unsavedConfirmOverlay = document.getElementById("unsavedConfirmOverlay");
+      const unsavedConfirmCloseBtn = document.getElementById("unsavedConfirmCloseBtn");
+      const unsavedConfirmSaveBtn = document.getElementById("unsavedConfirmSaveBtn");
+      const unsavedConfirmDiscardBtn = document.getElementById("unsavedConfirmDiscardBtn");
+      const unsavedConfirmError = document.getElementById("unsavedConfirmError");
       const deleteConfirmOverlay = document.getElementById("deleteConfirmOverlay");
       const deleteConfirmMessage = document.getElementById("deleteConfirmMessage");
       const deleteConfirmError = document.getElementById("deleteConfirmError");
@@ -1259,6 +1301,10 @@
       let backgroundColor = "#ffffff";
       let templateDetails = {};
       let saveNoticeTimer = null;
+      let drawerNoticeTimer = null;
+      let savedCanvasSignature = null;
+      let savedCanvasTemplateId = "";
+      let canvasSavePending = false;
       function setStatus(text, kind) {
         statusEl.textContent = text || "";
         statusEl.className = `status ${kind || ""}`.trim();
@@ -1285,6 +1331,20 @@
           orientation, textStyles: { ...textStyles }, font: inputs.font.value,
           color: inputs.color.value, previewText: previewTextInput.value,
         };
+      }
+
+      function canvasContentSignature() {
+        return JSON.stringify({
+          textBoxes: textBoxes.map((box, index) =>
+            index === selectedIndex ? { ...box, ...captureTextBox() } : box),
+          imageRotation, imageOpacity,
+        });
+      }
+
+      function hasUnsavedCanvasChanges() {
+        return Boolean(editingTemplateId && savedCanvasSignature !== null &&
+          (editingTemplateId !== savedCanvasTemplateId ||
+            canvasContentSignature() !== savedCanvasSignature));
       }
 
       function activateTextBox(box) {
@@ -1931,6 +1991,8 @@
         if (textBoxes.length) fitTextHeight();
         draw();
         resetHistory();
+        savedCanvasSignature = canvasContentSignature();
+        savedCanvasTemplateId = name;
         updateSaveState();
         return true;
       }
@@ -2271,6 +2333,8 @@
             history = session.history;
             historyIndex = session.historyIndex;
             selected = session.selected;
+            savedCanvasSignature = session.savedCanvasSignature;
+            savedCanvasTemplateId = session.savedCanvasTemplateId;
             applyEditorSnapshot(session.editor);
             updateHistoryButtons();
             updateSaveState();
@@ -2285,24 +2349,89 @@
         drawerNameInput.value = "";
         drawerPreviewInput.value = "";
         drawerError.textContent = "";
+        if (drawerNoticeTimer) clearTimeout(drawerNoticeTimer);
+        drawerNoticeTimer = null;
+        drawerSavedToast.hidden = true;
         deleteConfirmOverlay.hidden = true;
         templateConfigBtn.focus();
       }
 
-      templateConfigBtn.addEventListener("click", () => {
-        drawerSession = {
+      function captureDrawerSession() {
+        return {
           editor: editorSnapshot(), bitmap, imageFile, imageDataUrl: currentImageDataUrl,
           backgroundColor,
           templateId: editingTemplateId, scale, baseDisplayWidth,
           canvasWidth: canvas.width, canvasHeight: canvas.height,
           surfaceWidth: editorSurface.style.width,
           history: history.slice(), historyIndex, selected,
+          savedCanvasSignature, savedCanvasTemplateId,
         };
+      }
+
+      function openTemplateDrawer() {
+        drawerSession = captureDrawerSession();
         drawerOverlay.hidden = false;
         templateConfigBtn.setAttribute("aria-expanded", "true");
         draftActiveId = boundTemplateId;
         selectDrawerTemplate(editingTemplateId);
         drawerCloseBtn.focus();
+      }
+
+      templateConfigBtn.addEventListener("click", () => {
+        if (canvasSavePending || !drawerOverlay.hidden || !unsavedConfirmOverlay.hidden) return;
+        if (hasUnsavedCanvasChanges()) {
+          unsavedConfirmError.textContent = "";
+          unsavedConfirmOverlay.hidden = false;
+          unsavedConfirmSaveBtn.focus();
+          return;
+        }
+        openTemplateDrawer();
+      });
+      unsavedConfirmCloseBtn.addEventListener("click", () => {
+        unsavedConfirmOverlay.hidden = true;
+        templateConfigBtn.focus();
+      });
+      unsavedConfirmOverlay.addEventListener("click", (event) => {
+        if (event.target === unsavedConfirmOverlay && !unsavedConfirmSaveBtn.disabled) {
+          unsavedConfirmCloseBtn.click();
+        }
+      });
+      unsavedConfirmSaveBtn.addEventListener("click", async () => {
+        if (canvasSavePending) return;
+        unsavedConfirmSaveBtn.disabled = true;
+        unsavedConfirmDiscardBtn.disabled = true;
+        unsavedConfirmCloseBtn.disabled = true;
+        try {
+          if (await saveCanvas()) {
+            unsavedConfirmOverlay.hidden = true;
+            openTemplateDrawer();
+          } else {
+            unsavedConfirmError.textContent = statusEl.textContent || "保存失败";
+          }
+        } finally {
+          unsavedConfirmSaveBtn.disabled = false;
+          unsavedConfirmDiscardBtn.disabled = false;
+          unsavedConfirmCloseBtn.disabled = false;
+        }
+      });
+      unsavedConfirmDiscardBtn.addEventListener("click", async () => {
+        if (unsavedConfirmDiscardBtn.disabled) return;
+        unsavedConfirmSaveBtn.disabled = true;
+        unsavedConfirmDiscardBtn.disabled = true;
+        unsavedConfirmCloseBtn.disabled = true;
+        try {
+          if (!(await loadTemplateDetail(editingTemplateId))) {
+            throw new Error("无法还原模版画布");
+          }
+          unsavedConfirmOverlay.hidden = true;
+          openTemplateDrawer();
+        } catch (error) {
+          unsavedConfirmError.textContent = error.message || "无法还原模版画布";
+        } finally {
+          unsavedConfirmSaveBtn.disabled = false;
+          unsavedConfirmDiscardBtn.disabled = false;
+          unsavedConfirmCloseBtn.disabled = false;
+        }
       });
       drawerCloseBtn.addEventListener("click", async () => {
         const session = drawerSession;
@@ -2319,7 +2448,9 @@
       });
       window.addEventListener("keydown", (event) => {
         if (event.key !== "Escape") return;
-        if (!deleteConfirmOverlay.hidden) {
+        if (!unsavedConfirmOverlay.hidden) {
+          if (!unsavedConfirmCloseBtn.disabled) unsavedConfirmCloseBtn.click();
+        } else if (!deleteConfirmOverlay.hidden) {
           if (!drawerPending) deleteConfirmOverlay.hidden = true;
         } else if (!drawerOverlay.hidden) {
           closeDrawer();
@@ -2395,6 +2526,8 @@
           if (!editingTemplateId) {
             textBoxes = [];
             selectedIndex = -1;
+            savedCanvasSignature = null;
+            savedCanvasTemplateId = "";
             editorSurface.style.display = "none";
             canvasEmptyState.hidden = false;
             ++templateLoadSequence;
@@ -2411,13 +2544,7 @@
             resetHistory();
           }
           updateSaveState();
-          drawerSession = {
-            editor: editorSnapshot(), bitmap, imageFile, imageDataUrl: currentImageDataUrl,
-            backgroundColor, templateId: editingTemplateId, scale, baseDisplayWidth,
-            canvasWidth: canvas.width, canvasHeight: canvas.height,
-            surfaceWidth: editorSurface.style.width,
-            history: history.slice(), historyIndex, selected,
-          };
+          drawerSession = captureDrawerSession();
           selectDrawerTemplate(editingTemplateId);
         } catch (error) {
           deleteConfirmError.textContent = error.message || "删除模版失败";
@@ -2467,13 +2594,22 @@
             active_template: draftActiveId,
           });
           if (result.status === "error") throw new Error(result.message);
-          if (!(await loadTemplates(result.template))) {
+          const refreshed = await loadTemplates(result.template);
+          if (!refreshed) {
             boundTemplateId = result.active_template ?? result.template;
             editingTemplateId = result.template;
             updateSaveState();
           }
-          drawerPending = false;
-          closeDrawer(true);
+          draftActiveId = boundTemplateId;
+          selectDrawerTemplate(result.template);
+          drawerSession = captureDrawerSession();
+          if (!refreshed) drawerError.textContent = "已保存，但模版列表刷新失败";
+          if (drawerNoticeTimer) clearTimeout(drawerNoticeTimer);
+          drawerSavedToast.hidden = false;
+          drawerNoticeTimer = setTimeout(() => {
+            drawerSavedToast.hidden = true;
+            drawerNoticeTimer = null;
+          }, 2500);
         } catch (error) {
           drawerError.textContent = error.message || "保存模版配置失败";
         } finally {
@@ -2842,65 +2978,67 @@
         recordHistory();
       });
 
-      saveBtn.addEventListener("click", async () => {
+      async function saveCanvas() {
+        if (canvasSavePending) return false;
         if (!currentTemplateName()) {
           setStatus("Please enter a template name.", "error");
-          return;
+          return false;
         }
         const existing = templateDetails[currentTemplateName()];
         if (!existing && !imageFile && !currentImageDataUrl) {
           setStatus("Please choose a template image.", "error");
-          return;
+          return false;
         }
+        canvasSavePending = true;
         saveBtn.disabled = true;
         if (saveNoticeTimer) clearTimeout(saveNoticeTimer);
         setStatus("保存中...");
-        const payload = {};
-        if (task) {
-          payload.task = task;
-        }
-        payload.template_name = currentTemplateName();
-        if (existing) {
-          if (selectedIndex >= 0 && textBoxes[selectedIndex]) {
-            textBoxes[selectedIndex] = { ...textBoxes[selectedIndex], ...captureTextBox() };
-          }
-          payload.save_layers = true;
-          payload.background_rotation = imageRotation;
-          payload.background_opacity = imageOpacity;
-          payload.layers = textBoxes.map((box) => ({
-            id: box.id, field: String(box.number), type: "text",
-            x: Math.round(box.rect.x), y: Math.round(box.rect.y),
-            w: Math.round(box.rect.w), h: Math.round(box.rect.h),
-            fontsize: Math.round(box.fontSize), rotation: Math.round(box.rotation),
-            color: box.color, font: box.font, align: box.textAlign,
-            valign: box.textValign, orientation: box.orientation,
-            ...box.textStyles, default: box.previewText, required: true,
-          }));
-        } else {
-          payload.image = imageFile
-            ? await readFileAsDataUrl(imageFile)
-            : currentImageDataUrl;
-        }
-        payload.x = String(Math.round(rect.x));
-        payload.y = String(Math.round(rect.y));
-        payload.w = String(Math.round(rect.w));
-        payload.h = String(Math.round(rect.h));
-        payload.fontsize = String(Math.round(fontSize));
-        payload.rotation = String(Math.round(rotation));
-        payload.color = inputs.color.value || "#000000";
-        payload.align = textAlign;
-        payload.valign = textValign;
-        payload.orientation = orientation;
-        payload.bold = textStyles.bold;
-        payload.italic = textStyles.italic;
-        payload.underline = textStyles.underline;
-        payload.strikethrough = textStyles.strikethrough;
-        payload.default = previewTextInput.value;
-        if (currentFontValue()) {
-          payload.font = currentFontValue();
-        }
-
         try {
+          const payload = {};
+          if (task) {
+            payload.task = task;
+          }
+          payload.template_name = currentTemplateName();
+          if (existing) {
+            if (selectedIndex >= 0 && textBoxes[selectedIndex]) {
+              textBoxes[selectedIndex] = { ...textBoxes[selectedIndex], ...captureTextBox() };
+            }
+            payload.save_layers = true;
+            payload.background_rotation = imageRotation;
+            payload.background_opacity = imageOpacity;
+            payload.layers = textBoxes.map((box) => ({
+              id: box.id, field: String(box.number), type: "text",
+              x: Math.round(box.rect.x), y: Math.round(box.rect.y),
+              w: Math.round(box.rect.w), h: Math.round(box.rect.h),
+              fontsize: Math.round(box.fontSize), rotation: Math.round(box.rotation),
+              color: box.color, font: box.font, align: box.textAlign,
+              valign: box.textValign, orientation: box.orientation,
+              ...box.textStyles, default: box.previewText, required: true,
+            }));
+          } else {
+            payload.image = imageFile
+              ? await readFileAsDataUrl(imageFile)
+              : currentImageDataUrl;
+          }
+          payload.x = String(Math.round(rect.x));
+          payload.y = String(Math.round(rect.y));
+          payload.w = String(Math.round(rect.w));
+          payload.h = String(Math.round(rect.h));
+          payload.fontsize = String(Math.round(fontSize));
+          payload.rotation = String(Math.round(rotation));
+          payload.color = inputs.color.value || "#000000";
+          payload.align = textAlign;
+          payload.valign = textValign;
+          payload.orientation = orientation;
+          payload.bold = textStyles.bold;
+          payload.italic = textStyles.italic;
+          payload.underline = textStyles.underline;
+          payload.strikethrough = textStyles.strikethrough;
+          payload.default = previewTextInput.value;
+          if (currentFontValue()) {
+            payload.font = currentFontValue();
+          }
+
           const data = await pluginApiPost("editor/save", payload);
           if (data.status === "error") {
             throw new Error(data.message || "Failed to save template.");
@@ -2911,17 +3049,23 @@
             existing.background_rotation = imageRotation;
             existing.background_opacity = imageOpacity;
           }
+          savedCanvasSignature = canvasContentSignature();
+          savedCanvasTemplateId = currentTemplateName();
           setStatus("已保存", "ok");
           saveNoticeTimer = setTimeout(() => {
             if (statusEl.textContent === "已保存") setStatus("");
             saveNoticeTimer = null;
           }, 2500);
+          return true;
         } catch (error) {
           setStatus(error.message || "Failed to save template.", "error");
+          return false;
         } finally {
+          canvasSavePending = false;
           updateSaveState();
         }
-      });
+      }
+      saveBtn.addEventListener("click", saveCanvas);
 
       initFontControls();
       initIconControls();

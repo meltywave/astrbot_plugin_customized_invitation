@@ -150,6 +150,8 @@ function createEditor(
   const scheduledTimers = new Map();
   let nextTimer = 0;
   element("drawerOverlay").hidden = true;
+  element("drawerSavedToast").hidden = true;
+  element("unsavedConfirmOverlay").hidden = true;
   element("deleteConfirmOverlay").hidden = true;
   element("imageOpacityPopover").hidden = true;
   element("canvasEmptyState").hidden = true;
@@ -733,7 +735,7 @@ test("clicking the overlay keeps the selected card's canvas without saving confi
   assert.equal(editor.configRequests.length, 0);
 });
 
-test("Escape restores unsaved canvas edits after previewing another card", async () => {
+test("Escape cancels the unsaved canvas prompt without losing edits", async () => {
   const editor = createEditor({
     templates: {
       first: { display_name: "First", background: "data:image/png;base64,AA==",
@@ -751,14 +753,122 @@ test("Escape restores unsaved canvas edits after previewing another card", async
   assert.equal(editor.element("undoBtn").disabled, false);
 
   editor.element("templateConfigBtn").dispatch("click");
-  await editor.element("templateGrid").children[1].dispatch("click");
-  assert.equal(editor.state().x, 340);
+  assert.equal(editor.element("unsavedConfirmOverlay").hidden, false);
+  assert.equal(editor.element("drawerOverlay").hidden, true);
   editor.keydown("Escape");
+  assert.equal(editor.element("unsavedConfirmOverlay").hidden, true);
   assert.deepEqual(editor.state(), before);
   assert.equal(editor.evaluate("currentTemplateName()"), "first");
   assert.equal(editor.evaluate("backgroundColor"), "#ffffff");
   assert.equal(editor.element("undoBtn").disabled, false);
   assert.equal(editor.configRequests.length, 0);
+});
+
+test("selection alone opens configuration without an unsaved prompt", async () => {
+  const editor = createEditor({
+    templates: { first: { layers: [
+      { id: "text_1", field: "1", x: 100, y: 100, w: 300, h: 80 },
+    ] } },
+    current: "first",
+  });
+  await new Promise(setImmediate);
+  editor.pointer("pointerdown", 200, 140);
+  editor.pointer("pointerup", 200, 140);
+  assert.equal(editor.evaluate("hasUnsavedCanvasChanges()"), false);
+  editor.element("templateConfigBtn").dispatch("click");
+  assert.equal(editor.element("unsavedConfirmOverlay").hidden, true);
+  assert.equal(editor.element("drawerOverlay").hidden, false);
+});
+
+test("image changes prompt for saving and undo clears the prompt condition", async () => {
+  const editor = createEditor({
+    templates: { first: { background: "data:image/png;base64,AA==", layers: [] } },
+    current: "first",
+  });
+  await new Promise(setImmediate);
+  editor.pointer("pointerdown", 480, 270);
+  editor.element("rotateImageBtn").dispatch("click");
+  assert.equal(editor.evaluate("hasUnsavedCanvasChanges()"), true);
+  editor.element("templateConfigBtn").dispatch("click");
+  assert.equal(editor.element("unsavedConfirmOverlay").hidden, false);
+  editor.element("unsavedConfirmCloseBtn").dispatch("click");
+  editor.element("undoBtn").dispatch("click");
+  assert.equal(editor.evaluate("hasUnsavedCanvasChanges()"), false);
+  editor.element("templateConfigBtn").dispatch("click");
+  assert.equal(editor.element("unsavedConfirmOverlay").hidden, true);
+  assert.equal(editor.element("drawerOverlay").hidden, false);
+});
+
+test("unsaved canvas prompt cancels with x and saves before opening configuration", async () => {
+  const editor = createEditor({
+    templates: { first: { layers: [
+      { id: "text_1", field: "1", x: 100, y: 100, w: 300, h: 80 },
+    ] } },
+    current: "first",
+  });
+  await new Promise(setImmediate);
+  editor.pointer("pointerdown", 200, 140);
+  editor.pointer("pointerup", 200, 140);
+  editor.element("previewTextInput").value = "Edited";
+  editor.element("previewTextInput").dispatch("input");
+  assert.equal(editor.evaluate("hasUnsavedCanvasChanges()"), true);
+  editor.element("templateConfigBtn").dispatch("click");
+  assert.equal(editor.element("unsavedConfirmOverlay").hidden, false);
+  assert.equal(editor.element("drawerOverlay").hidden, true);
+  editor.element("unsavedConfirmCloseBtn").dispatch("click");
+  assert.equal(editor.element("unsavedConfirmOverlay").hidden, true);
+  assert.equal(editor.element("previewTextInput").value, "Edited");
+  assert.equal(editor.saved.length, 0);
+  editor.element("templateConfigBtn").dispatch("click");
+  await editor.element("unsavedConfirmSaveBtn").dispatch("click");
+  assert.equal(editor.saved.length, 1);
+  assert.equal(editor.saved[0].layers[0].default, "Edited");
+  assert.equal(editor.element("unsavedConfirmOverlay").hidden, true);
+  assert.equal(editor.element("drawerOverlay").hidden, false);
+  assert.equal(editor.evaluate("hasUnsavedCanvasChanges()"), false);
+});
+
+test("discarding canvas edits restores the saved template before opening configuration", async () => {
+  const editor = createEditor({
+    templates: { first: { layers: [
+      { id: "text_1", field: "1", x: 100, y: 100, w: 300, h: 80 },
+    ] } },
+    current: "first",
+  });
+  await new Promise(setImmediate);
+  editor.pointer("pointerdown", 200, 140);
+  editor.pointer("pointermove", 230, 140);
+  editor.pointer("pointerup", 230, 140);
+  assert.equal(editor.state().x, 130);
+  editor.element("templateConfigBtn").dispatch("click");
+  await editor.element("unsavedConfirmDiscardBtn").dispatch("click");
+  assert.equal(editor.saved.length, 0);
+  assert.equal(editor.state().x, 100);
+  assert.equal(editor.element("drawerOverlay").hidden, false);
+  assert.equal(editor.evaluate("hasUnsavedCanvasChanges()"), false);
+  await editor.element("drawerCloseBtn").dispatch("click");
+  assert.equal(editor.state().x, 100);
+});
+
+test("failed canvas save keeps the unsaved prompt open", async () => {
+  const editor = createEditor({
+    templates: { first: { layers: [
+      { id: "text_1", field: "1", x: 100, y: 100, w: 300, h: 80 },
+    ] } },
+    current: "first",
+  });
+  await new Promise(setImmediate);
+  editor.element("previewTextInput").value = "Edited";
+  editor.element("previewTextInput").dispatch("input");
+  editor.evaluate('pluginApiPost = async () => { throw new Error("Save failed"); }');
+  editor.element("templateConfigBtn").dispatch("click");
+  await editor.element("unsavedConfirmSaveBtn").dispatch("click");
+  assert.equal(editor.element("unsavedConfirmOverlay").hidden, false);
+  assert.equal(editor.element("drawerOverlay").hidden, true);
+  assert.equal(editor.element("unsavedConfirmError").textContent, "Save failed");
+  assert.equal(editor.evaluate("hasUnsavedCanvasChanges()"), true);
+  editor.element("unsavedConfirmCloseBtn").dispatch("click");
+  assert.equal(editor.element("previewTextInput").value, "Edited");
 });
 
 test("delete requires confirmation and cancellation leaves the template intact", async () => {
@@ -880,6 +990,7 @@ test("confirmed deletion clears the active template and leaves the drawer open",
   await new Promise(setImmediate);
   assert.equal(editor.element("drawerOverlay").hidden, true);
   assert.equal(editor.evaluate("currentTemplateName()"), "");
+  assert.equal(editor.evaluate("hasUnsavedCanvasChanges()"), false);
 });
 
 test("deleting a non-active template keeps the active template", async () => {
@@ -903,6 +1014,7 @@ test("deleting a non-active template keeps the active template", async () => {
   assert.equal(editor.evaluate("boundTemplateId"), "first");
   assert.equal(editor.evaluate("currentTemplateName()"), "first");
   assert.equal(editor.state().x, 100);
+  assert.equal(editor.evaluate("hasUnsavedCanvasChanges()"), false);
   assert.equal(editor.element("templateGrid").children.length, 2);
 });
 
@@ -1017,7 +1129,8 @@ test("saving an uploaded image replaces the canvas without a second save", async
   assert.equal(editor.evaluate("bitmap.width"), 320);
   assert.equal(editor.canvas.width, 320);
   assert.equal(editor.canvas.height, 180);
-  assert.equal(editor.element("drawerOverlay").hidden, true);
+  assert.equal(editor.element("drawerOverlay").hidden, false);
+  assert.equal(editor.element("drawerSavedToast").hidden, false);
   assert.equal(editor.saved.length, 0);
 });
 
@@ -1065,11 +1178,18 @@ test("renaming default without uploading an image preserves its preview", async 
   assert.equal(editor.configRequests[0].template, "default");
   assert.equal(editor.configRequests[0].preview, undefined);
   assert.equal(editor.evaluate("templateDetails['New name'].display_name"), "New name");
-  assert.equal(editor.element("drawerOverlay").hidden, true);
+  assert.equal(editor.element("drawerOverlay").hidden, false);
+  assert.equal(editor.element("drawerSavedToast").hidden, false);
   assert.equal(editor.saved.length, 0);
 
-  editor.element("templateConfigBtn").dispatch("click");
   assert.equal(editor.element("drawerPreviewImage").src, preview);
+  editor.flushTimers();
+  assert.equal(editor.element("drawerSavedToast").hidden, true);
+  assert.equal(editor.element("drawerOverlay").hidden, false);
+  editor.evaluate('selectDrawerTemplate("")');
+  await editor.element("drawerCloseBtn").dispatch("click");
+  assert.equal(editor.element("drawerOverlay").hidden, true);
+  assert.equal(editor.evaluate("currentTemplateName()"), "New name");
 });
 
 test("new template requires a name but accepts no preview image", async () => {
@@ -1092,7 +1212,8 @@ test("new template requires a name but accepts no preview image", async () => {
   assert.equal(editor.evaluate("boundTemplateId"), "New invitation");
   assert.equal(editor.element("saveBtn").disabled, false);
   assert.equal(editor.evaluate("currentTemplateName()"), "New invitation");
-  assert.equal(editor.element("drawerOverlay").hidden, true);
+  assert.equal(editor.element("drawerOverlay").hidden, false);
+  assert.equal(editor.element("drawerSavedToast").hidden, false);
 });
 
 test("failed template configuration keeps the drawer open and restores controls", async () => {
