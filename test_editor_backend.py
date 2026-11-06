@@ -313,6 +313,46 @@ class EditorBackendTests(unittest.TestCase):
         state.set_active_template("owner", "")
         self.assertIsNone(state.get_effective_template("owner"))
 
+    def test_sample_visit_is_recorded_once_without_changing_active_template(
+        self,
+    ) -> None:
+        state = InvitationState(self.root / "state.json")
+        self.manager.create_empty_template("Other")
+        state.set_active_template("editor-global", "Other")
+
+        with patch.dict(os.environ, {"ASTRBOT_ROOT": str(self.root)}):
+            from astrbot_plugin_customized_invitation.main import (
+                CustomizedInvitationPlugin,
+            )
+
+            plugin = CustomizedInvitationPlugin.__new__(CustomizedInvitationPlugin)
+            plugin.manager = self.manager
+            plugin.state = state
+
+            class RequestStub:
+                query: dict = {}
+
+            with (
+                patch(
+                    "astrbot_plugin_customized_invitation.main.request", RequestStub()
+                ),
+                patch(
+                    "astrbot_plugin_customized_invitation.main.json_response",
+                    side_effect=lambda payload: payload,
+                ),
+            ):
+                without_sample = asyncio.run(plugin.list_editor_templates())
+                self.assertFalse(without_sample["first_visit"])
+
+                self.manager.create_empty_template("样例")
+                first = asyncio.run(plugin.list_editor_templates())
+                second = asyncio.run(plugin.list_editor_templates())
+
+        self.assertTrue(first["first_visit"])
+        self.assertFalse(second["first_visit"])
+        self.assertEqual(first["current"], "Other")
+        self.assertEqual(state.get_active_template("editor-global"), "Other")
+
     def test_template_binding_updates_upload_task(self) -> None:
         state = InvitationState(self.root / "state.json")
         token = state.create_upload_task("owner", "old")

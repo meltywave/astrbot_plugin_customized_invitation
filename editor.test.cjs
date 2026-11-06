@@ -151,6 +151,7 @@ function createEditor(
   let nextTimer = 0;
   element("drawerOverlay").hidden = true;
   element("deleteConfirmOverlay").hidden = true;
+  element("canvasEmptyState").hidden = true;
   const windowListeners = new Map();
   const window = {
     location: { search: "", hash: "" },
@@ -166,7 +167,9 @@ function createEditor(
       ready: async () => {},
       apiGet: async (endpoint) => {
         listRequests.push(endpoint);
-        return templateData;
+        const response = { ...templateData };
+        templateData.first_visit = false;
+        return response;
       },
       apiPost: async (endpoint, payload) => {
         if ((endpoint === "editor/template-config" && payload.action === "delete") ||
@@ -338,6 +341,59 @@ test("top bar shows template configuration and keeps canvas save separate", asyn
   assert.doesNotMatch(html, /id="(?:newTemplateBtn|existingTemplateBtn|templateSelect|templateNameInput|imageInput)"/);
 });
 
+test("first visit shows the sample without changing the active template", async () => {
+  const data = {
+    templates: {
+      other: { display_name: "Other", layer: { x: 10 } },
+      sample: { display_name: "样例", layer: { x: 200 } },
+    },
+    current: "other",
+    first_visit: true,
+  };
+  const first = createEditor(data);
+  assert.match(html, /\.editor-surface\s*\{[^}]*visibility: hidden;/);
+  await new Promise(setImmediate);
+  assert.equal(first.evaluate("currentTemplateName()"), "sample");
+  assert.equal(first.evaluate("boundTemplateId"), "other");
+  assert.equal(first.element("editorSurface").style.visibility, "visible");
+  assert.equal(first.element("editorSurface").style.display, "");
+  assert.equal(first.element("canvasEmptyState").hidden, true);
+
+  const next = createEditor(data);
+  await new Promise(setImmediate);
+  assert.equal(next.evaluate("currentTemplateName()"), "other");
+  assert.equal(next.evaluate("boundTemplateId"), "other");
+});
+
+test("later visits show the first listed template when none is active", async () => {
+  const data = {
+    templates: {
+      first: { display_name: "First", layer: { x: 20 } },
+      "样例": { display_name: "样例", layer: { x: 200 } },
+    },
+    current: "",
+    first_visit: true,
+  };
+  const first = createEditor(data);
+  await new Promise(setImmediate);
+  assert.equal(first.evaluate("currentTemplateName()"), "样例");
+  assert.equal(first.evaluate("boundTemplateId"), "");
+
+  const next = createEditor(data);
+  await new Promise(setImmediate);
+  assert.equal(next.evaluate("currentTemplateName()"), "first");
+  assert.equal(next.element("saveBtn").disabled, false);
+});
+
+test("an empty template list shows an empty state instead of a blank canvas", async () => {
+  const editor = createEditor();
+  await new Promise(setImmediate);
+  assert.equal(editor.element("editorSurface").style.visibility, undefined);
+  assert.equal(editor.element("editorSurface").style.display, "none");
+  assert.equal(editor.element("canvasEmptyState").hidden, false);
+  assert.equal(editor.element("saveBtn").disabled, true);
+});
+
 test("canvas save briefly shows a short success notice", async () => {
   const editor = createEditor();
   editor.setImageDataUrl("data:image/png;base64,AA==");
@@ -393,14 +449,15 @@ test("drawer close and overlay discard metadata edits without requests", async (
   assert.equal(button.getAttribute("aria-expanded"), "false");
 });
 
-test("the template switch enables one card and binds it without updating metadata", async () => {
-  const editor = createEditor({
+test("the template switch saves immediately and the next editor loads it", async () => {
+  const data = {
     templates: {
       first: { display_name: "First", background: "data:image/png;base64,AA==" },
       second: { display_name: "Second", background: "data:image/png;base64,AA==" },
     },
     current: "first",
-  });
+  };
+  const editor = createEditor(data);
   await new Promise(setImmediate);
   editor.element("templateConfigBtn").dispatch("click");
   const firstSwitch = editor.element("templateGrid").children[0].children[1].children[1];
@@ -410,12 +467,13 @@ test("the template switch enables one card and binds it without updating metadat
   assert.equal(editor.element("templateGrid").children[0].children[1].children[1].getAttribute("aria-checked"), "false");
   assert.equal(editor.element("templateGrid").children[1].children[1].children[1].getAttribute("aria-checked"), "true");
   assert.equal(editor.element("drawerNameInput").value, "Second");
-  assert.equal(editor.evaluate("boundTemplateId"), "first");
-  assert.equal(editor.configRequests.length, 0);
-  await editor.element("drawerConfirmBtn").dispatch("click");
-  assert.deepEqual(editor.configRequests.map(({ action, template }) => [action, template]), [["bind", "second"]]);
   assert.equal(editor.evaluate("boundTemplateId"), "second");
+  assert.deepEqual(editor.configRequests.map(({ action, template }) => [action, template]), [["bind", "second"]]);
+  await editor.element("drawerCloseBtn").dispatch("click");
   assert.equal(editor.element("drawerOverlay").hidden, true);
+  const next = createEditor(data);
+  await new Promise(setImmediate);
+  assert.equal(next.evaluate("currentTemplateName()"), "second");
 });
 
 test("clicking the enabled switch again clears every enabled template", async () => {
@@ -433,19 +491,37 @@ test("clicking the enabled switch again clears every enabled template", async ()
   await new Promise(setImmediate);
   editor.element("templateConfigBtn").dispatch("click");
   const firstSwitch = editor.element("templateGrid").children[0].children[1].children[1];
-  firstSwitch.dispatch("click", { stopPropagation() {} });
+  await firstSwitch.dispatch("click", { stopPropagation() {} });
   assert.equal(editor.evaluate("draftActiveId"), "");
   for (const card of editor.element("templateGrid").children.slice(0, 2)) {
     assert.equal(card.children[1].children[1].getAttribute("aria-checked"), "false");
   }
-  await editor.element("drawerConfirmBtn").dispatch("click");
   assert.equal(editor.configRequests[0].active_template, "");
   assert.equal(editor.evaluate("boundTemplateId"), "");
   assert.equal(editor.evaluate("currentTemplateName()"), "first");
+  await editor.element("drawerCloseBtn").dispatch("click");
   editor.element("templateConfigBtn").dispatch("click");
   for (const card of editor.element("templateGrid").children.slice(0, 2)) {
     assert.equal(card.children[1].children[1].getAttribute("aria-checked"), "false");
   }
+});
+
+test("failed immediate binding restores the previous enabled switch", async () => {
+  const editor = createEditor({
+    templates: {
+      first: { display_name: "First" },
+      second: { display_name: "Second" },
+    },
+    current: "first",
+  });
+  await new Promise(setImmediate);
+  editor.element("templateConfigBtn").dispatch("click");
+  editor.evaluate('window.AstrBotPluginPage.apiPost = async () => { throw new Error("Bind failed"); }');
+  const secondSwitch = editor.element("templateGrid").children[1].children[1].children[1];
+  await secondSwitch.dispatch("click", { stopPropagation() {} });
+  assert.equal(editor.evaluate("boundTemplateId"), "first");
+  assert.equal(editor.element("templateGrid").children[0].children[1].children[1].getAttribute("aria-checked"), "true");
+  assert.equal(editor.element("drawerError").textContent, "Bind failed");
 });
 
 test("drawer labels and inputs share a row", () => {
@@ -977,18 +1053,22 @@ test("undo and redo restore text, font styles, and orientation", () => {
 test("loading another template resets undo and redo history", async () => {
   const editor = createEditor({
     templates: {
+      other: {
+        layer: { x: 100, y: 100, w: 300, h: 80, fontsize: 40 },
+      },
       saved: {
         background: "data:image/png;base64,AA==",
         layer: { x: 100, y: 100, w: 300, h: 80, fontsize: 40 },
       },
     },
     user_templates: ["saved"],
+    current: "other",
   });
   await new Promise(setImmediate);
   const before = editor.state();
-  editor.pointer("pointerdown", 150, 250);
-  editor.pointer("pointermove", 170, 250);
-  editor.pointer("pointerup", 170, 250);
+  editor.pointer("pointerdown", 200, 140);
+  editor.pointer("pointermove", 220, 140);
+  editor.pointer("pointerup", 220, 140);
   assert.equal(editor.element("undoBtn").disabled, false);
 
   editor.element("templateConfigBtn").dispatch("click");
@@ -1298,14 +1378,18 @@ test("switching templates keeps the selected toolbar open", async () => {
         background: "data:image/png;base64,AA==",
         layer: { x: 100, y: 100, w: 300, h: 80, fontsize: 40 },
       },
+      other: {
+        layer: { x: 300, y: 100, w: 300, h: 80, fontsize: 40 },
+      },
     },
     user_templates: ["saved"],
+    current: "saved",
   });
   await new Promise(setImmediate);
-  editor.pointer("pointerdown", 480, 268);
-  editor.pointer("pointerup", 480, 268);
+  editor.pointer("pointerdown", 200, 140);
+  editor.pointer("pointerup", 200, 140);
   editor.element("templateConfigBtn").dispatch("click");
-  editor.evaluate('selectDrawerTemplate("saved")');
+  editor.evaluate('selectDrawerTemplate("other")');
   await editor.element("drawerConfirmBtn").dispatch("click");
   assert.equal(editor.state().selected, true);
   assert.equal(editor.element("selectionToolbar").classList.contains("visible"), true);

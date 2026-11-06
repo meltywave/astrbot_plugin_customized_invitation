@@ -388,6 +388,16 @@
         position: relative;
         flex: none;
         width: min(960px, calc(100vw - 48px));
+        visibility: hidden;
+      }
+
+      .canvas-empty-state {
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .canvas-empty-state[hidden] {
+        display: none;
       }
 
       canvas {
@@ -910,6 +920,7 @@
             </div>
             <span class="rotation-angle" id="rotationAngle"></span>
           </div>
+          <div id="canvasEmptyState" class="canvas-empty-state" hidden>暂无可用模版</div>
         </div>
         <div class="horizontal-scroll" id="horizontalScroll" aria-label="画布水平滚动">
           <div class="horizontal-scroll-content" id="horizontalScrollContent"></div>
@@ -983,6 +994,7 @@
       const horizontalScrollContent = document.getElementById("horizontalScrollContent");
       const selectionToolbar = document.getElementById("selectionToolbar");
       const editorSurface = document.getElementById("editorSurface");
+      const canvasEmptyState = document.getElementById("canvasEmptyState");
       const selectionBox = document.getElementById("selectionBox");
       const alignmentGuide = document.getElementById("alignmentGuide");
       const rotationAngle = document.getElementById("rotationAngle");
@@ -1788,23 +1800,38 @@
         });
       }
 
-      async function loadTemplates(preferredTemplateId = "") {
+      async function loadTemplates(preferredTemplateId = "", initialLoad = false) {
         try {
           const data = await pluginApiGet("editor/templates", { task });
           if (data.status === "error") {
             throw new Error(data.message || "Failed to load templates.");
           }
           templateDetails = data.templates || {};
-          const currentName = data.current ?? initialTemplateName;
+          const currentName = data.current || (task ? initialTemplateName : "");
           boundTemplateId = templateDetails[currentName] ? currentName : "";
+          const firstVisit = initialLoad && data.first_visit === true;
+          const sampleId = Object.keys(templateDetails).find((name) =>
+            name === "样例" || templateDetails[name].display_name === "样例");
           editingTemplateId = templateDetails[preferredTemplateId]
-            ? preferredTemplateId : boundTemplateId;
+            ? preferredTemplateId
+            : (firstVisit && sampleId) || boundTemplateId ||
+              (templateDetails[initialTemplateName] ? initialTemplateName : "") ||
+              Object.keys(templateDetails)[0] || "";
           if (editingTemplateId) {
-            await loadTemplateDetail(editingTemplateId);
+            if (!(await loadTemplateDetail(editingTemplateId))) return false;
+            editorSurface.style.display = "";
+            editorSurface.style.visibility = "visible";
+            canvasEmptyState.hidden = true;
+          } else {
+            editorSurface.style.display = "none";
+            canvasEmptyState.hidden = false;
           }
           updateSaveState();
           return true;
         } catch (error) {
+          editorSurface.style.display = "none";
+          canvasEmptyState.textContent = "模版加载失败";
+          canvasEmptyState.hidden = false;
           setStatus(error.message || "Failed to load templates.", "error");
           return false;
         }
@@ -1842,16 +1869,44 @@
           toggle.setAttribute("role", "switch");
           toggle.setAttribute("aria-label", `启用${detail.display_name || name}`);
           toggle.setAttribute("aria-checked", String(draftActiveId === name));
-          toggle.addEventListener("click", (event) => {
+          toggle.addEventListener("click", async (event) => {
             event.stopPropagation();
-            draftActiveId = draftActiveId === name ? "" : name;
+            if (drawerPending) return;
+            const previousActiveId = boundTemplateId;
+            const nextActiveId = draftActiveId === name ? "" : name;
+            draftActiveId = nextActiveId;
             selectDrawerTemplate(name, true);
+            drawerPending = true;
+            drawerConfirmBtn.disabled = true;
+            drawerDeleteBtn.disabled = true;
+            drawerCloseBtn.disabled = true;
+            try {
+              const result = await pluginApiPost("editor/template-config", {
+                task, action: "bind", template: name, active_template: nextActiveId,
+              });
+              if (result.status === "error") throw new Error(result.message);
+              boundTemplateId = result.active_template ?? nextActiveId;
+              draftActiveId = boundTemplateId;
+              renderTemplateCards();
+            } catch (error) {
+              draftActiveId = previousActiveId;
+              renderTemplateCards();
+              drawerError.textContent = error.message || "无法保存启用状态";
+            } finally {
+              drawerPending = false;
+              drawerConfirmBtn.disabled = !drawerNameInput.value.trim();
+              drawerDeleteBtn.disabled = !draftTemplateId;
+              drawerCloseBtn.disabled = false;
+            }
           });
           footer.appendChild(toggle);
           card.appendChild(footer);
-          card.addEventListener("click", () => selectDrawerTemplate(name, true));
+          card.addEventListener("click", () => {
+            if (!drawerPending) return selectDrawerTemplate(name, true);
+          });
           card.addEventListener("keydown", (event) => {
-            if (event.target === card && (event.key === "Enter" || event.key === " ")) {
+            if (!drawerPending && event.target === card &&
+                (event.key === "Enter" || event.key === " ")) {
               event.preventDefault();
               selectDrawerTemplate(name, true);
             }
@@ -1862,7 +1917,9 @@
         createCard.type = "button";
         createCard.className = `template-card create${draftTemplateId ? "" : " selected"}`;
         createCard.innerHTML = '<span class="create-plus">+</span><span>新建模版</span>';
-        createCard.addEventListener("click", () => selectDrawerTemplate("", true));
+        createCard.addEventListener("click", () => {
+          if (!drawerPending) return selectDrawerTemplate("", true);
+        });
         templateGrid.appendChild(createCard);
       }
 
@@ -2464,7 +2521,7 @@
       fitTextHeight();
       draw();
       resetHistory();
-      loadTemplates();
+      loadTemplates("", true);
     </script>
   </body>
 </html>
